@@ -26,7 +26,7 @@ def test_parameters():
     params.update(ball_mass=0.003)
     assert params.ball_mass == 0.003
 
-    print("✓ パラメータテスト成功")
+    print("[OK] パラメータテスト成功")
 
 
 def test_ball():
@@ -42,7 +42,7 @@ def test_ball():
     expected_gravity = np.array([0.0, 0.0, -params.ball_mass * params.gravity])
     assert np.allclose(force[:3], expected_gravity, atol=1e-6)
 
-    print("✓ ボールテスト成功")
+    print("[OK] ボールテスト成功")
 
 
 def test_table():
@@ -61,7 +61,7 @@ def test_table():
     assert is_collision
     assert np.allclose(normal, [0, 0, 1])
 
-    print("✓ テーブルテスト成功")
+    print("[OK] テーブルテスト成功")
 
 
 def test_racket():
@@ -73,7 +73,7 @@ def test_racket():
     assert racket.side == 1
     assert racket.position[0] > 0  # +X側
 
-    print("✓ ラケットテスト成功")
+    print("[OK] ラケットテスト成功")
 
 
 def test_engine():
@@ -91,7 +91,7 @@ def test_engine():
     assert engine.state.step_count == 1
     assert engine.state.time > 0
 
-    print("✓ エンジンテスト成功")
+    print("[OK] エンジンテスト成功")
 
 
 def test_simulation():
@@ -109,7 +109,7 @@ def test_simulation():
     # テーブルに当たったかチェック
     assert results['collision_count']['table'] > 0
 
-    print("✓ シミュレーションテスト成功")
+    print("[OK] シミュレーションテスト成功")
 
 
 if __name__ == "__main__":
