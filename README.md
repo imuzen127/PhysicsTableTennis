@@ -65,6 +65,30 @@ PhysicsTableTennis/
 └── examples/             # サンプルコード
 ```
 
+## ドキュメント
+
+- **[プロジェクトレポート](REPORT.md)** - 詳細な技術レポート
+  - プロジェクト概要と開発動機
+  - システム設計とアーキテクチャ
+  - 物理計算の詳細（数式含む）
+  - 使用例とデモ
+  - 今後の展望
+
+## サンプルコード
+
+`examples/` ディレクトリに以下のサンプルがあります：
+
+1. `basic_simulation.py` - 基本的なシミュレーション
+2. `parameter_study.py` - パラメータスタディ
+3. `rally_simulation.py` - ラリーシミュレーション
+4. `motion_recording.py` - 動作記録の例
+
+## テスト
+
+```bash
+python tests/test_basic.py
+```
+
 ## ライセンス
 
 MIT License
