@@ -95,6 +95,7 @@ class GameWorld:
         self.running = True
         self.paused = False
         self.show_help = True
+        self.show_debug = False  # F3 debug screen
         self.time_scale = 1.0
 
         # Stats
@@ -616,6 +617,8 @@ class GameWorld:
                         pygame.event.set_grab(False)
                     elif event.key == K_F1:
                         self.show_help = not self.show_help
+                    elif event.key == K_F3:
+                        self.show_debug = not self.show_debug
 
             elif event.type == MOUSEBUTTONDOWN:
                 if self.menu_open:
@@ -692,13 +695,71 @@ class GameWorld:
                 hud.blit(text, (self.width - 180, y))
                 y += 28
 
+        # F3 Debug screen (Minecraft-style)
+        if self.show_debug and not self.menu_open:
+            # Normalize yaw to -180 to 180
+            yaw = self.camera_yaw % 360
+            if yaw > 180:
+                yaw -= 360
+
+            # Pitch is already -80 to 80
+            pitch = self.camera_pitch
+
+            # Direction facing
+            if -45 <= yaw < 45:
+                facing = "East (+X)"
+            elif 45 <= yaw < 135:
+                facing = "North (+Y)"
+            elif yaw >= 135 or yaw < -135:
+                facing = "West (-X)"
+            else:
+                facing = "South (-Y)"
+
+            # FPS
+            fps = self.clock.get_fps()
+
+            debug_lines = [
+                f"Table Tennis Physics Simulation",
+                f"",
+                f"XYZ: {self.camera_pos[0]:.3f} / {self.camera_pos[1]:.3f} / {self.camera_pos[2]:.3f}",
+                f"Facing: {facing}",
+                f"Rotation: {yaw:.1f} / {pitch:.1f}",
+                f"",
+                f"FPS: {fps:.0f}",
+                f"Time Scale: {self.time_scale}x",
+            ]
+
+            if self.ball_active:
+                ball_pos = self.ball.position
+                ball_vel = self.ball.velocity
+                debug_lines.extend([
+                    f"",
+                    f"Ball XYZ: {ball_pos[0]:.3f} / {ball_pos[1]:.3f} / {ball_pos[2]:.3f}",
+                    f"Ball Vel: {ball_vel[0]:.2f} / {ball_vel[1]:.2f} / {ball_vel[2]:.2f}",
+                    f"Ball Speed: {self.ball.get_speed():.2f} m/s",
+                    f"Ball Spin: {self.ball.get_spin_rpm():.0f} RPM",
+                ])
+
+            # Semi-transparent background
+            debug_height = len(debug_lines) * 20 + 10
+            debug_bg = pygame.Surface((320, debug_height), pygame.SRCALPHA)
+            debug_bg.fill((0, 0, 0, 180))
+            hud.blit(debug_bg, (5, 5))
+
+            y = 10
+            for line in debug_lines:
+                if line:
+                    text = self.font_small.render(line, True, (255, 255, 255))
+                    hud.blit(text, (10, y))
+                y += 20
+
         # Help
-        if self.show_help and not self.menu_open:
+        if self.show_help and not self.menu_open and not self.show_debug:
             help_lines = [
                 "WASD - Move",
                 "Mouse Side 2/1 - Up/Down",
                 "/ - Commands    ESC - Menu",
-                "F1 - Toggle help"
+                "F1 - Help    F3 - Debug"
             ]
             y = 15
             for line in help_lines:
