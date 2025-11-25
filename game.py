@@ -422,7 +422,7 @@ class GameWorld:
 
         # Mouse look (always active when not in menu/console)
         rel = pygame.mouse.get_rel()
-        self.camera_yaw += rel[0] * self.mouse_sensitivity
+        self.camera_yaw -= rel[0] * self.mouse_sensitivity  # Fixed: inverted
         self.camera_pitch -= rel[1] * self.mouse_sensitivity
         self.camera_pitch = max(-80, min(80, self.camera_pitch))
 
@@ -629,16 +629,21 @@ class GameWorld:
                         elif 420 <= my <= 470:  # Quit
                             self.running = False
                 else:
-                    # Mouse side buttons
-                    if event.button == 4:  # Side button 1 (back) - down
+                    # Debug: show button number for non-standard buttons
+                    if event.button not in [1, 2, 3]:
+                        self.add_output(f"Mouse btn {event.button} down")
+
+                    # Mouse side buttons - try multiple common mappings
+                    # X1 (back) = 4 or 6 or 8, X2 (forward) = 5 or 7 or 9
+                    if event.button in [4, 6, 8]:
                         self.mouse_side1_held = True
-                    elif event.button == 5:  # Side button 2 (forward) - up
+                    elif event.button in [5, 7, 9]:
                         self.mouse_side2_held = True
 
             elif event.type == MOUSEBUTTONUP:
-                if event.button == 4:
+                if event.button in [4, 6, 8]:
                     self.mouse_side1_held = False
-                elif event.button == 5:
+                elif event.button in [5, 7, 9]:
                     self.mouse_side2_held = False
 
         return self.running
