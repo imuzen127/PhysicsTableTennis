@@ -2,25 +2,27 @@
 
 ## Project Status: Active Development
 
-**Date:** 2025-11-25  
+**Date:** 2025-11-25
 **Repository:** https://github.com/imuzen127/PhysicsTableTennis
 
 ---
 
 ## Latest Additions
 
-### 1. Interactive 3D Game (`game.py`) - NEW!
+### 1. Interactive 3D Game (`game.py`) - MAIN
 
 Minecraft-style immersive experience where you ARE inside the game world.
 
 **Features:**
 - First-person camera with WASD movement
+- Mouse always controls view (FPS-style)
 - Real-time ball physics visualization
-- In-game command console (press T)
+- In-game command console (press /)
+- F3 debug screen with coordinates & rotation
 - Ball trajectory trail effect
 - Bounce markers on table
 - Slow motion mode
-- Live stats display (speed, spin, height)
+- ESC menu with Resume/Quit buttons
 
 **Run:** `python game.py`
 
@@ -28,14 +30,32 @@ Minecraft-style immersive experience where you ARE inside the game world.
 | Key | Action |
 |-----|--------|
 | WASD | Move around |
-| Space/Shift | Up/Down |
-| Right Mouse + Drag | Look around |
-| T | Open command console |
-| P | Pause |
-| R | Reset |
-| ESC | Quit |
+| Mouse | Look around (always active) |
+| Mouse Side 2 | Up (ascend) |
+| Mouse Side 1 | Down (descend) |
+| / (slash) | Open command console |
+| ESC | Toggle menu / Close chat |
+| F1 | Toggle help |
+| F3 | Toggle debug screen |
 
-**In-Game Commands:**
+**F3 Debug Screen (Minecraft-style):**
+```
+Table Tennis Physics Simulation
+
+XYZ: -3.000 / 2.000 / 1.500
+Facing: South (-Y)
+Rotation: -30.0 / 15.0
+
+FPS: 60
+Time Scale: 1.0x
+
+Ball XYZ: 0.000 / 0.000 / 1.000
+Ball Vel: 10.00 / 0.00 / 3.00
+Ball Speed: 10.44 m/s
+Ball Spin: 3000 RPM
+```
+
+**In-Game Commands (press / to open):**
 ```
 ball 0 0 1          - Place ball at position
 launch 10 0 3       - Launch ball with velocity
@@ -57,13 +77,6 @@ Text-based interactive command interface for detailed simulation control.
 
 **Run:** `python console.py`
 
-**Features:**
-- Full parameter control
-- Step-by-step simulation
-- Event logging
-- 3D visualization export
-- Tutorial mode
-
 ---
 
 ### 3. Simple Runner (`main.py`)
@@ -71,12 +84,6 @@ Text-based interactive command interface for detailed simulation control.
 Command-line interface for quick simulations.
 
 **Run:** `python main.py --help`
-
-**Options:**
-- `--setup`: offensive/defensive/allround
-- `--speed`: Initial speed (m/s)
-- `--spin`: Spin rate (RPM)
-- `--show`: Show 3D plot
 
 ---
 
@@ -105,10 +112,10 @@ Command-line interface for quick simulations.
 
 ```
 PhysicsTableTennis/
-├── game.py              # Interactive 3D game (NEW!)
-├── console.py           # Command-line interface (NEW!)
-├── main.py              # Simple runner (NEW!)
-├── interactive.py       # OpenGL real-time viewer
+├── game.py              # Interactive 3D game (MAIN)
+├── console.py           # Command-line interface
+├── main.py              # Simple runner
+├── interactive.py       # OpenGL viewer (legacy)
 ├── src/
 │   ├── physics/
 │   │   ├── parameters.py   # Physics parameters
@@ -125,25 +132,30 @@ PhysicsTableTennis/
 
 ---
 
+## Git Commits (Latest First)
+
+| Commit | Description |
+|--------|-------------|
+| 1d40c87 | Add F3 debug screen with coordinates and rotation |
+| 63bf5ea | Fix mouse controls: invert look, detect side buttons |
+| 0405030 | Fix flicker and update controls |
+| f84a6de | Add immersive 3D game with in-game commands |
+| 44085e4 | Add console.py command interface |
+| f219e9d | Add interactive.py OpenGL viewer |
+| 2c31b71 | Add main.py entry point |
+| 865fd1d | Enhance physics engine with Magnus effect |
+
+---
+
 ## Quick Start
 
-### Option 1: Play the Game (Recommended)
 ```bash
 cd PhysicsTableTennis
+pip install numpy matplotlib pygame PyOpenGL
 python game.py
 ```
-Then press T and type `serve` or `topspin`
 
-### Option 2: Console Mode
-```bash
-python console.py
-```
-Type `tutorial` for guide
-
-### Option 3: Simple Simulation
-```bash
-python main.py --show
-```
+Press `/` and type `serve` or `topspin`
 
 ---
 
@@ -160,14 +172,4 @@ Install: `pip install numpy matplotlib pygame PyOpenGL`
 
 ---
 
-## Git Commits
-
-1. `865fd1d` - Enhanced physics engine with Magnus effect
-2. `2c31b71` - Added main.py entry point
-3. `f219e9d` - Added interactive.py OpenGL viewer
-4. `44085e4` - Added console.py command interface
-5. `f84a6de` - Added game.py immersive 3D game
-
----
-
-*Report generated: 2025-11-25*
+*Report updated: 2025-11-25*
