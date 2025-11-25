@@ -4,8 +4,14 @@ Table Tennis Physics Simulation - Interactive Game
 A Minecraft-like experience where you're IN the game world,
 can type commands, and watch the ball fly in real-time.
 
-Press T to open command console, type command, press Enter.
-Watch the ball move in real-time 3D!
+Controls:
+    WASD         - Move
+    Mouse Side 2 - Up (ascend)
+    Mouse Side 1 - Down (descend)
+    Mouse        - Look around (always active)
+    / (slash)    - Open chat/command
+    ESC          - Toggle menu / Close chat
+    Enter        - Send command
 """
 
 import pygame
@@ -37,13 +43,17 @@ class GameWorld:
         pygame.init()
         pygame.font.init()
 
-        # Create window with OpenGL
-        self.screen = pygame.display.set_mode((width, height), DOUBLEBUF | OPENGL)
-        pygame.display.set_caption("Table Tennis Simulation - Press T for commands")
+        # Create window with OpenGL - use HWSURFACE for less flicker
+        self.screen = pygame.display.set_mode((width, height), DOUBLEBUF | OPENGL | HWSURFACE)
+        pygame.display.set_caption("Table Tennis Simulation - Press / for commands")
+
+        # Lock mouse to center for FPS-style control
+        pygame.mouse.set_visible(False)
+        pygame.event.set_grab(True)
 
         # Fonts
-        self.font_large = pygame.font.SysFont('consolas', 28)
-        self.font_medium = pygame.font.SysFont('consolas', 22)
+        self.font_large = pygame.font.SysFont('consolas', 32)
+        self.font_medium = pygame.font.SysFont('consolas', 24)
         self.font_small = pygame.font.SysFont('consolas', 18)
 
         # Physics
@@ -63,32 +73,38 @@ class GameWorld:
 
         # Camera - player viewpoint
         self.camera_pos = np.array([-3.0, 2.0, 1.5])
-        self.camera_yaw = -30.0  # Looking toward table
+        self.camera_yaw = -30.0
         self.camera_pitch = 15.0
-        self.camera_speed = 0.1
+        self.camera_speed = 0.08
 
-        # Mouse look
-        self.mouse_locked = False
-        self.mouse_sensitivity = 0.2
+        # Mouse sensitivity
+        self.mouse_sensitivity = 0.15
 
-        # Console state
+        # Console/Chat state
         self.console_open = False
         self.console_input = ""
         self.console_history = []
+        self.history_index = -1
         self.console_output = []
         self.max_output_lines = 8
+
+        # Menu state
+        self.menu_open = False
 
         # Game state
         self.running = True
         self.paused = False
         self.show_help = True
-        self.slow_motion = False
         self.time_scale = 1.0
 
         # Stats
         self.bounces = 0
         self.max_speed = 0
         self.flight_time = 0
+
+        # Mouse button state for up/down
+        self.mouse_side1_held = False  # Button 4 - down
+        self.mouse_side2_held = False  # Button 5 - up
 
         # Clock
         self.clock = pygame.time.Clock()
@@ -98,8 +114,8 @@ class GameWorld:
         self._init_gl()
 
         # Welcome message
-        self.add_output("Welcome! Press T to type commands")
-        self.add_output("Try: ball 0 0 1 then launch 10 0 3")
+        self.add_output("Welcome! Press / to type commands")
+        self.add_output("Try: serve  or  topspin")
 
     def _init_gl(self):
         """Initialize OpenGL"""
@@ -112,9 +128,9 @@ class GameWorld:
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
-        # Main light (sun-like)
+        # Main light
         glLightfv(GL_LIGHT0, GL_POSITION, [5.0, 5.0, 10.0, 0.0])
-        glLightfv(GL_LIGHT0, GL_AMBIENT, [0.3, 0.3, 0.35, 1.0])
+        glLightfv(GL_LIGHT0, GL_AMBIENT, [0.4, 0.4, 0.45, 1.0])
         glLightfv(GL_LIGHT0, GL_DIFFUSE, [0.9, 0.9, 0.85, 1.0])
 
         # Fill light
@@ -122,7 +138,7 @@ class GameWorld:
         glLightfv(GL_LIGHT1, GL_DIFFUSE, [0.3, 0.3, 0.4, 1.0])
 
         # Sky color
-        glClearColor(0.4, 0.6, 0.8, 1.0)
+        glClearColor(0.5, 0.7, 0.9, 1.0)
 
         # Perspective
         glMatrixMode(GL_PROJECTION)
@@ -130,10 +146,9 @@ class GameWorld:
         glMatrixMode(GL_MODELVIEW)
 
     def _update_camera(self):
-        """First-person camera update"""
+        """First-person camera"""
         glLoadIdentity()
 
-        # Calculate look direction
         yaw_rad = math.radians(self.camera_yaw)
         pitch_rad = math.radians(self.camera_pitch)
 
@@ -148,11 +163,11 @@ class GameWorld:
         )
 
     def _draw_ground(self):
-        """Draw the floor/ground"""
+        """Draw the floor"""
         glDisable(GL_LIGHTING)
 
         # Main floor
-        glColor4f(0.25, 0.35, 0.25, 1.0)
+        glColor4f(0.3, 0.4, 0.3, 1.0)
         glBegin(GL_QUADS)
         glVertex3f(-10, -10, 0)
         glVertex3f(10, -10, 0)
@@ -160,28 +175,28 @@ class GameWorld:
         glVertex3f(-10, 10, 0)
         glEnd()
 
-        # Grid lines
-        glColor4f(0.3, 0.4, 0.3, 0.5)
+        # Grid
+        glColor4f(0.35, 0.45, 0.35, 0.7)
         glLineWidth(1.0)
         glBegin(GL_LINES)
         for i in range(-10, 11):
-            glVertex3f(i, -10, 0.001)
-            glVertex3f(i, 10, 0.001)
-            glVertex3f(-10, i, 0.001)
-            glVertex3f(10, i, 0.001)
+            glVertex3f(i, -10, 0.002)
+            glVertex3f(i, 10, 0.002)
+            glVertex3f(-10, i, 0.002)
+            glVertex3f(10, i, 0.002)
         glEnd()
 
         glEnable(GL_LIGHTING)
 
     def _draw_table(self):
-        """Draw the table tennis table"""
+        """Draw table tennis table"""
         hl = self.params.table_length / 2
         hw = self.params.table_width / 2
         h = self.params.table_height
-        th = 0.03  # Table thickness
+        th = 0.03
 
-        # Table top - dark blue
-        glColor3f(0.0, 0.2, 0.4)
+        # Table top
+        glColor3f(0.0, 0.25, 0.5)
         glBegin(GL_QUADS)
         glNormal3f(0, 0, 1)
         glVertex3f(-hl, -hw, h)
@@ -191,33 +206,27 @@ class GameWorld:
         glEnd()
 
         # Table sides
-        glColor3f(0.0, 0.15, 0.3)
-        # Front
+        glColor3f(0.0, 0.2, 0.4)
         glBegin(GL_QUADS)
+        # Front
         glNormal3f(0, -1, 0)
         glVertex3f(-hl, -hw, h - th)
         glVertex3f(hl, -hw, h - th)
         glVertex3f(hl, -hw, h)
         glVertex3f(-hl, -hw, h)
-        glEnd()
         # Back
-        glBegin(GL_QUADS)
         glNormal3f(0, 1, 0)
         glVertex3f(-hl, hw, h - th)
         glVertex3f(hl, hw, h - th)
         glVertex3f(hl, hw, h)
         glVertex3f(-hl, hw, h)
-        glEnd()
         # Left
-        glBegin(GL_QUADS)
         glNormal3f(-1, 0, 0)
         glVertex3f(-hl, -hw, h - th)
         glVertex3f(-hl, hw, h - th)
         glVertex3f(-hl, hw, h)
         glVertex3f(-hl, -hw, h)
-        glEnd()
         # Right
-        glBegin(GL_QUADS)
         glNormal3f(1, 0, 0)
         glVertex3f(hl, -hw, h - th)
         glVertex3f(hl, hw, h - th)
@@ -225,33 +234,27 @@ class GameWorld:
         glVertex3f(hl, -hw, h)
         glEnd()
 
-        # White lines on table
+        # White lines
         glDisable(GL_LIGHTING)
         glColor3f(1.0, 1.0, 1.0)
         glLineWidth(3.0)
-
-        # Border
         glBegin(GL_LINE_LOOP)
-        glVertex3f(-hl + 0.02, -hw + 0.02, h + 0.001)
-        glVertex3f(hl - 0.02, -hw + 0.02, h + 0.001)
-        glVertex3f(hl - 0.02, hw - 0.02, h + 0.001)
-        glVertex3f(-hl + 0.02, hw - 0.02, h + 0.001)
+        glVertex3f(-hl + 0.02, -hw + 0.02, h + 0.002)
+        glVertex3f(hl - 0.02, -hw + 0.02, h + 0.002)
+        glVertex3f(hl - 0.02, hw - 0.02, h + 0.002)
+        glVertex3f(-hl + 0.02, hw - 0.02, h + 0.002)
         glEnd()
-
-        # Center line
         glBegin(GL_LINES)
-        glVertex3f(0, -hw, h + 0.001)
-        glVertex3f(0, hw, h + 0.001)
-        # End lines
-        glVertex3f(-hl, 0, h + 0.001)
-        glVertex3f(hl, 0, h + 0.001)
+        glVertex3f(0, -hw, h + 0.002)
+        glVertex3f(0, hw, h + 0.002)
+        glVertex3f(-hl, 0, h + 0.002)
+        glVertex3f(hl, 0, h + 0.002)
         glEnd()
-
         glEnable(GL_LIGHTING)
 
         # Net
         nh = self.params.table.net_height
-        glColor4f(0.9, 0.9, 0.9, 0.8)
+        glColor4f(0.95, 0.95, 0.95, 0.9)
         glBegin(GL_QUADS)
         glVertex3f(0, -hw - 0.15, h)
         glVertex3f(0, hw + 0.15, h)
@@ -265,32 +268,26 @@ class GameWorld:
         self._draw_cylinder(0, hw + 0.15, h, 0.015, nh)
 
         # Table legs
-        glColor3f(0.3, 0.3, 0.3)
-        leg_positions = [
-            (-hl + 0.15, -hw + 0.1),
-            (-hl + 0.15, hw - 0.1),
-            (hl - 0.15, -hw + 0.1),
-            (hl - 0.15, hw - 0.1),
-        ]
-        for lx, ly in leg_positions:
+        glColor3f(0.25, 0.25, 0.25)
+        for lx, ly in [(-hl + 0.15, -hw + 0.1), (-hl + 0.15, hw - 0.1),
+                       (hl - 0.15, -hw + 0.1), (hl - 0.15, hw - 0.1)]:
             self._draw_cylinder(lx, ly, 0, 0.025, h - th)
 
     def _draw_cylinder(self, x, y, z, radius, height, segments=12):
-        """Draw a cylinder"""
+        """Draw cylinder"""
         glBegin(GL_QUAD_STRIP)
         for i in range(segments + 1):
             angle = 2 * math.pi * i / segments
-            nx = math.cos(angle)
-            ny = math.sin(angle)
+            nx, ny = math.cos(angle), math.sin(angle)
             glNormal3f(nx, ny, 0)
             glVertex3f(x + radius * nx, y + radius * ny, z)
             glVertex3f(x + radius * nx, y + radius * ny, z + height)
         glEnd()
 
     def _draw_ball(self):
-        """Draw the ball with trail and effects"""
+        """Draw ball with trail"""
         if not self.ball_active:
-            # Draw ghost ball at set position
+            # Ghost ball
             glColor4f(1.0, 0.6, 0.0, 0.3)
             glPushMatrix()
             glTranslatef(*self.ball.position)
@@ -300,25 +297,24 @@ class GameWorld:
             glPopMatrix()
             return
 
-        # Draw trail
+        # Trail
         if len(self.ball_trail) > 1:
             glDisable(GL_LIGHTING)
             glLineWidth(3.0)
             glBegin(GL_LINE_STRIP)
             for i, pos in enumerate(self.ball_trail):
                 alpha = (i / len(self.ball_trail)) ** 0.5
-                # Color gradient from yellow to orange
                 glColor4f(1.0, 0.5 + 0.3 * alpha, 0.0, alpha * 0.7)
                 glVertex3f(*pos)
             glEnd()
             glEnable(GL_LIGHTING)
 
-        # Draw bounce markers
+        # Bounce markers
         glDisable(GL_LIGHTING)
-        for marker in self.bounce_markers[-5:]:  # Last 5 bounces
+        for marker in self.bounce_markers[-5:]:
             glColor4f(0.0, 1.0, 0.0, 0.5)
             glPushMatrix()
-            glTranslatef(marker[0], marker[1], marker[2] + 0.002)
+            glTranslatef(marker[0], marker[1], marker[2] + 0.003)
             glBegin(GL_LINE_LOOP)
             for i in range(16):
                 angle = 2 * math.pi * i / 16
@@ -327,37 +323,18 @@ class GameWorld:
             glPopMatrix()
         glEnable(GL_LIGHTING)
 
-        # Draw ball - bright orange
+        # Ball
         glColor3f(1.0, 0.5, 0.0)
         glPushMatrix()
         glTranslatef(*self.ball.position)
-
         quadric = gluNewQuadric()
         gluSphere(quadric, self.params.ball_radius, 20, 20)
         gluDeleteQuadric(quadric)
-
-        # Spin indicator ring
-        if self.ball.get_spin_rate() > 50:
-            glDisable(GL_LIGHTING)
-            spin_axis = self.ball.spin / np.linalg.norm(self.ball.spin)
-            glColor4f(0.0, 1.0, 1.0, 0.6)
-            glLineWidth(2.0)
-            glBegin(GL_LINE_LOOP)
-            # Draw ring perpendicular to spin axis
-            r = self.params.ball_radius * 1.3
-            for i in range(24):
-                angle = 2 * math.pi * i / 24
-                # Simple ring in XY plane (approximation)
-                glVertex3f(r * math.cos(angle), r * math.sin(angle), 0)
-            glEnd()
-            glEnable(GL_LIGHTING)
-
         glPopMatrix()
 
     def _draw_racket(self):
-        """Draw the racket"""
+        """Draw racket"""
         pos = self.racket.position
-
         glPushMatrix()
         glTranslatef(*pos)
 
@@ -370,7 +347,7 @@ class GameWorld:
         gluDeleteQuadric(quadric)
         glPopMatrix()
 
-        # Blade (red side)
+        # Blade
         glColor3f(0.8, 0.1, 0.1)
         glPushMatrix()
         glScalef(0.085, 0.08, 0.008)
@@ -381,75 +358,50 @@ class GameWorld:
 
         glPopMatrix()
 
-    def _draw_sky(self):
-        """Draw simple sky background elements"""
-        glDisable(GL_LIGHTING)
-        glDisable(GL_DEPTH_TEST)
-
-        # Sun
-        glColor3f(1.0, 0.95, 0.8)
-        glPushMatrix()
-        glTranslatef(10, 10, 15)
-        quadric = gluNewQuadric()
-        gluSphere(quadric, 1.0, 16, 16)
-        gluDeleteQuadric(quadric)
-        glPopMatrix()
-
-        glEnable(GL_DEPTH_TEST)
-        glEnable(GL_LIGHTING)
-
     def update_physics(self):
-        """Update physics simulation"""
+        """Update physics"""
         if not self.ball_active or self.paused:
             return
 
-        # Time scaling
         dt = self.params.dt * self.time_scale
-
-        # Update ball
         self.ball.update(dt)
         self.flight_time += dt
 
-        # Track max speed
         speed = self.ball.get_speed()
         if speed > self.max_speed:
             self.max_speed = speed
 
-        # Add to trail
         self.ball_trail.append(self.ball.position.copy())
         if len(self.ball_trail) > self.max_trail:
             self.ball_trail.pop(0)
 
-        # Check collisions
         if self.collision.handle_ball_table_collision(self.ball, self.table):
             self.bounces += 1
             self.bounce_markers.append(self.ball.position.copy())
-            self.add_output(f"Bounce #{self.bounces} at ({self.ball.position[0]:.2f}, {self.ball.position[1]:.2f})")
+            self.add_output(f"Bounce #{self.bounces}")
 
         if self.collision.handle_ball_net_collision(self.ball, self.table):
-            self.add_output("Hit the net!")
+            self.add_output("Net!")
 
-        # Check out of bounds
         if self.ball.position[2] < 0:
-            self.add_output(f"Ball landed! Flight time: {self.flight_time:.2f}s, Bounces: {self.bounces}")
+            self.add_output(f"Landed! Time: {self.flight_time:.2f}s")
             self.ball_active = False
         elif np.linalg.norm(self.ball.position[:2]) > 8:
-            self.add_output("Ball out of bounds!")
+            self.add_output("Out of bounds!")
             self.ball_active = False
 
     def handle_movement(self):
-        """Handle camera/player movement"""
-        if self.console_open:
+        """Handle player movement"""
+        if self.console_open or self.menu_open:
             return
 
         keys = pygame.key.get_pressed()
 
-        # Calculate forward/right vectors
         yaw_rad = math.radians(self.camera_yaw)
         forward = np.array([math.cos(yaw_rad), math.sin(yaw_rad), 0])
         right = np.array([math.sin(yaw_rad), -math.cos(yaw_rad), 0])
 
-        # Movement
+        # WASD movement
         if keys[K_w]:
             self.camera_pos += forward * self.camera_speed
         if keys[K_s]:
@@ -458,26 +410,26 @@ class GameWorld:
             self.camera_pos -= right * self.camera_speed
         if keys[K_d]:
             self.camera_pos += right * self.camera_speed
-        if keys[K_SPACE]:
+
+        # Mouse side buttons for up/down
+        if self.mouse_side2_held:  # Side button 2 = up
             self.camera_pos[2] += self.camera_speed
-        if keys[K_LSHIFT]:
+        if self.mouse_side1_held:  # Side button 1 = down
             self.camera_pos[2] -= self.camera_speed
 
         # Keep above ground
-        self.camera_pos[2] = max(0.5, self.camera_pos[2])
+        self.camera_pos[2] = max(0.3, self.camera_pos[2])
 
-        # Mouse look when right button held or locked
-        if self.mouse_locked or pygame.mouse.get_pressed()[2]:
-            rel = pygame.mouse.get_rel()
-            self.camera_yaw += rel[0] * self.mouse_sensitivity
-            self.camera_pitch -= rel[1] * self.mouse_sensitivity
-            self.camera_pitch = max(-80, min(80, self.camera_pitch))
+        # Mouse look (always active when not in menu/console)
+        rel = pygame.mouse.get_rel()
+        self.camera_yaw += rel[0] * self.mouse_sensitivity
+        self.camera_pitch -= rel[1] * self.mouse_sensitivity
+        self.camera_pitch = max(-80, min(80, self.camera_pitch))
 
     def process_command(self, cmd):
-        """Process a typed command"""
+        """Process command"""
         cmd = cmd.strip().lower()
         parts = cmd.split()
-
         if not parts:
             return
 
@@ -485,7 +437,6 @@ class GameWorld:
         args = parts[1:]
 
         try:
-            # Ball position
             if command in ['ball', 'b']:
                 if len(args) >= 3:
                     pos = np.array([float(args[0]), float(args[1]), float(args[2])])
@@ -493,11 +444,10 @@ class GameWorld:
                     self.ball_active = False
                     self.ball_trail = []
                     self.bounce_markers = []
-                    self.add_output(f"Ball placed at ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f})")
+                    self.add_output(f"Ball at ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f})")
                 else:
                     self.add_output("Usage: ball <x> <y> <z>")
 
-            # Launch ball
             elif command in ['launch', 'l', 'fire', 'shoot']:
                 if len(args) >= 3:
                     vel = np.array([float(args[0]), float(args[1]), float(args[2])])
@@ -508,117 +458,84 @@ class GameWorld:
                     self.bounces = 0
                     self.max_speed = np.linalg.norm(vel)
                     self.flight_time = 0
-                    speed = np.linalg.norm(vel)
-                    self.add_output(f"Launched at {speed:.1f} m/s!")
+                    self.add_output(f"Launched! {np.linalg.norm(vel):.1f} m/s")
                 else:
                     self.add_output("Usage: launch <vx> <vy> <vz>")
 
-            # Spin
             elif command in ['spin', 'sp']:
-                if len(args) >= 1:
+                if args:
                     spin_type = args[0]
                     rpm = float(args[1]) if len(args) > 1 else 3000
                     spin_rad = rpm * 2 * math.pi / 60
-
                     if spin_type in ['top', 'topspin', 't']:
                         self.ball.spin = np.array([0, spin_rad, 0])
-                        self.add_output(f"Topspin: {rpm:.0f} RPM")
+                        self.add_output(f"Topspin {rpm:.0f} RPM")
                     elif spin_type in ['back', 'backspin', 'b']:
                         self.ball.spin = np.array([0, -spin_rad, 0])
-                        self.add_output(f"Backspin: {rpm:.0f} RPM")
+                        self.add_output(f"Backspin {rpm:.0f} RPM")
                     elif spin_type in ['side', 'sidespin', 's']:
                         self.ball.spin = np.array([0, 0, spin_rad])
-                        self.add_output(f"Sidespin: {rpm:.0f} RPM")
+                        self.add_output(f"Sidespin {rpm:.0f} RPM")
                     elif spin_type in ['none', 'no', '0']:
                         self.ball.spin = np.array([0, 0, 0])
                         self.add_output("No spin")
-                    else:
-                        self.add_output("Types: top, back, side, none")
                 else:
-                    self.add_output("Usage: spin <type> [rpm]")
+                    self.add_output("Usage: spin <top/back/side> [rpm]")
 
-            # Serve (quick ball + launch)
             elif command in ['serve', 'sv']:
                 power = float(args[0]) if args else 12
-                angle = float(args[1]) if len(args) > 1 else 10
-
-                # Place ball at serve position
                 self.ball.reset(position=np.array([-1.2, 0.0, 0.9]))
-
-                # Calculate velocity
-                angle_rad = math.radians(angle)
-                vel = np.array([power * math.cos(angle_rad), 0, power * math.sin(angle_rad) * 0.3 + 1])
+                angle_rad = math.radians(10)
+                vel = np.array([power * math.cos(angle_rad), 0, power * 0.15 + 1])
                 self.ball.velocity = vel
-                self.ball.spin = np.array([0, 200, 0])  # Default topspin
-
+                self.ball.spin = np.array([0, 200, 0])
                 self.ball_active = True
                 self.ball_trail = [self.ball.position.copy()]
                 self.bounce_markers = []
                 self.bounces = 0
                 self.max_speed = np.linalg.norm(vel)
                 self.flight_time = 0
-                self.add_output(f"Served at {np.linalg.norm(vel):.1f} m/s!")
+                self.add_output(f"Serve! {np.linalg.norm(vel):.1f} m/s")
 
-            # Slow motion
             elif command in ['slow', 'slowmo']:
                 factor = float(args[0]) if args else 0.2
                 self.time_scale = factor
-                self.add_output(f"Time scale: {factor}x")
+                self.add_output(f"Speed: {factor}x")
 
-            # Normal speed
             elif command in ['normal', 'fast']:
                 self.time_scale = 1.0
                 self.add_output("Normal speed")
 
-            # Pause
             elif command in ['pause', 'p']:
                 self.paused = not self.paused
                 self.add_output("Paused" if self.paused else "Resumed")
 
-            # Reset
             elif command in ['reset', 'r']:
                 self.ball.reset(position=np.array([0, 0, 1]))
                 self.ball_active = False
                 self.ball_trail = []
                 self.bounce_markers = []
                 self.bounces = 0
-                self.max_speed = 0
                 self.flight_time = 0
                 self.add_output("Reset!")
 
-            # Teleport camera
-            elif command in ['tp', 'teleport', 'goto']:
+            elif command in ['tp', 'teleport']:
                 if len(args) >= 3:
                     self.camera_pos = np.array([float(args[0]), float(args[1]), float(args[2])])
-                    self.add_output(f"Teleported to ({args[0]}, {args[1]}, {args[2]})")
+                    self.add_output(f"TP to ({args[0]}, {args[1]}, {args[2]})")
                 elif args and args[0] == 'ball':
                     self.camera_pos = self.ball.position.copy() + np.array([-1, 0, 0.5])
-                    self.add_output("Teleported near ball")
+                    self.add_output("TP to ball")
                 elif args and args[0] == 'table':
                     self.camera_pos = np.array([-2.5, 1.5, 1.5])
-                    self.add_output("Teleported to table view")
-                else:
-                    self.add_output("Usage: tp <x> <y> <z> or tp ball/table")
+                    self.add_output("TP to table view")
 
-            # Status
-            elif command in ['status', 'stat', 'info']:
-                pos = self.ball.position
-                vel = self.ball.velocity
-                speed = np.linalg.norm(vel)
-                rpm = self.ball.get_spin_rpm()
-                self.add_output(f"Pos: ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
-                self.add_output(f"Speed: {speed:.1f} m/s, Spin: {rpm:.0f} RPM")
-
-            # Help
             elif command in ['help', 'h', '?']:
-                self.add_output("Commands: ball, launch, spin, serve")
-                self.add_output("slow, normal, pause, reset, tp, status")
+                self.add_output("ball, launch, spin, serve, slow, tp, reset")
 
-            # Clear
             elif command in ['clear', 'cls']:
                 self.console_output = []
 
-            # Example commands
             elif command == 'topspin':
                 self.process_command("ball -1 0 1")
                 self.process_command("spin top 4000")
@@ -635,170 +552,214 @@ class GameWorld:
                 self.process_command("launch 20 0 -2")
 
             else:
-                self.add_output(f"Unknown command: {command}")
+                self.add_output(f"Unknown: {command}")
 
-        except ValueError as e:
-            self.add_output(f"Error: {e}")
         except Exception as e:
             self.add_output(f"Error: {e}")
 
     def add_output(self, text):
-        """Add text to console output"""
+        """Add console output"""
         self.console_output.append(text)
         if len(self.console_output) > self.max_output_lines:
             self.console_output.pop(0)
 
     def handle_events(self):
-        """Handle pygame events"""
+        """Handle events"""
         for event in pygame.event.get():
             if event.type == QUIT:
                 self.running = False
 
             elif event.type == KEYDOWN:
                 if self.console_open:
-                    # Console input handling
+                    # Chat input mode
                     if event.key == K_RETURN:
                         if self.console_input:
                             self.console_history.append(self.console_input)
                             self.process_command(self.console_input)
                             self.console_input = ""
-                    elif event.key == K_ESCAPE:
+                        self.console_open = False
+                    elif event.key == K_ESCAPE or event.key == K_SLASH:
                         self.console_open = False
                         self.console_input = ""
                     elif event.key == K_BACKSPACE:
                         self.console_input = self.console_input[:-1]
                     elif event.key == K_UP and self.console_history:
-                        self.console_input = self.console_history[-1]
+                        if self.history_index < len(self.console_history) - 1:
+                            self.history_index += 1
+                            self.console_input = self.console_history[-(self.history_index + 1)]
+                    elif event.key == K_DOWN:
+                        if self.history_index > 0:
+                            self.history_index -= 1
+                            self.console_input = self.console_history[-(self.history_index + 1)]
+                        else:
+                            self.history_index = -1
+                            self.console_input = ""
                     else:
-                        if event.unicode and event.unicode.isprintable():
+                        if event.unicode and event.unicode.isprintable() and event.unicode != '/':
                             self.console_input += event.unicode
+
+                elif self.menu_open:
+                    # Menu mode
+                    if event.key == K_ESCAPE:
+                        self.menu_open = False
+                        pygame.mouse.set_visible(False)
+                        pygame.event.set_grab(True)
+
                 else:
-                    # Normal key handling
-                    if event.key == K_t:
+                    # Normal game mode
+                    if event.key == K_SLASH:
                         self.console_open = True
-                        pygame.mouse.get_rel()  # Clear accumulated motion
+                        self.history_index = -1
                     elif event.key == K_ESCAPE:
-                        self.running = False
+                        self.menu_open = True
+                        pygame.mouse.set_visible(True)
+                        pygame.event.set_grab(False)
                     elif event.key == K_F1:
                         self.show_help = not self.show_help
-                    elif event.key == K_TAB:
-                        self.mouse_locked = not self.mouse_locked
-                        pygame.mouse.set_visible(not self.mouse_locked)
-                        if self.mouse_locked:
-                            pygame.mouse.get_rel()
-                    elif event.key == K_p:
-                        self.paused = not self.paused
-                        self.add_output("Paused" if self.paused else "Resumed")
-                    elif event.key == K_r:
-                        self.process_command("reset")
 
             elif event.type == MOUSEBUTTONDOWN:
-                if event.button == 4:  # Scroll up
-                    self.camera_speed = min(0.3, self.camera_speed + 0.02)
-                elif event.button == 5:  # Scroll down
-                    self.camera_speed = max(0.02, self.camera_speed - 0.02)
+                if self.menu_open:
+                    # Check menu button clicks
+                    mx, my = event.pos
+                    if 550 <= mx <= 850:
+                        if 350 <= my <= 400:  # Resume
+                            self.menu_open = False
+                            pygame.mouse.set_visible(False)
+                            pygame.event.set_grab(True)
+                        elif 420 <= my <= 470:  # Quit
+                            self.running = False
+                else:
+                    # Mouse side buttons
+                    if event.button == 4:  # Side button 1 (back) - down
+                        self.mouse_side1_held = True
+                    elif event.button == 5:  # Side button 2 (forward) - up
+                        self.mouse_side2_held = True
+
+            elif event.type == MOUSEBUTTONUP:
+                if event.button == 4:
+                    self.mouse_side1_held = False
+                elif event.button == 5:
+                    self.mouse_side2_held = False
 
         return self.running
 
     def render_hud(self):
-        """Render 2D HUD elements using pygame"""
-        # Create a surface for 2D rendering
-        hud_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        """Render HUD"""
+        hud = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
 
-        # Console output (always visible, bottom left)
-        y = self.height - 40 - len(self.console_output) * 22
+        # Console output
+        y = self.height - 50 - len(self.console_output) * 24
         for line in self.console_output:
             text = self.font_small.render(line, True, (255, 255, 255))
-            hud_surface.blit(text, (15, y))
-            y += 22
+            # Shadow
+            shadow = self.font_small.render(line, True, (0, 0, 0))
+            hud.blit(shadow, (17, y + 2))
+            hud.blit(text, (15, y))
+            y += 24
 
-        # Console input bar
+        # Console input
         if self.console_open:
-            # Dark background for input
-            pygame.draw.rect(hud_surface, (0, 0, 0, 200), (10, self.height - 40, self.width - 20, 35))
-            pygame.draw.rect(hud_surface, (100, 100, 100), (10, self.height - 40, self.width - 20, 35), 2)
-
-            input_text = f"> {self.console_input}_"
-            text = self.font_medium.render(input_text, True, (0, 255, 0))
-            hud_surface.blit(text, (20, self.height - 35))
+            pygame.draw.rect(hud, (0, 0, 0, 220), (10, self.height - 45, self.width - 20, 40))
+            pygame.draw.rect(hud, (80, 80, 80), (10, self.height - 45, self.width - 20, 40), 2)
+            input_text = f"/{self.console_input}_"
+            text = self.font_medium.render(input_text, True, (100, 255, 100))
+            hud.blit(text, (20, self.height - 40))
         else:
-            # Hint to open console
-            hint = self.font_small.render("Press T to type commands", True, (200, 200, 200))
-            hud_surface.blit(hint, (15, self.height - 30))
+            hint = self.font_small.render("/ - Chat    ESC - Menu", True, (180, 180, 180))
+            hud.blit(hint, (15, self.height - 28))
 
-        # Ball status (top right)
+        # Ball status
         if self.ball_active:
             speed = self.ball.get_speed()
             rpm = self.ball.get_spin_rpm()
             pos = self.ball.position
-
-            status_lines = [
+            lines = [
                 f"Speed: {speed:.1f} m/s",
                 f"Spin: {rpm:.0f} RPM",
                 f"Height: {pos[2]:.2f} m",
-                f"Bounces: {self.bounces}",
-                f"Time: {self.flight_time:.2f}s"
+                f"Bounces: {self.bounces}"
             ]
-
             y = 15
-            for line in status_lines:
-                text = self.font_medium.render(line, True, (255, 255, 0))
-                hud_surface.blit(text, (self.width - 180, y))
-                y += 26
+            for line in lines:
+                shadow = self.font_medium.render(line, True, (0, 0, 0))
+                text = self.font_medium.render(line, True, (255, 255, 100))
+                hud.blit(shadow, (self.width - 178, y + 2))
+                hud.blit(text, (self.width - 180, y))
+                y += 28
 
-        # Help text (top left)
-        if self.show_help:
+        # Help
+        if self.show_help and not self.menu_open:
             help_lines = [
-                "WASD - Move    Space/Shift - Up/Down",
-                "Right Mouse - Look around",
-                "T - Open command console",
-                "P - Pause    R - Reset    F1 - Hide help",
-                "",
-                "Quick commands: serve, topspin, backspin, smash"
+                "WASD - Move",
+                "Mouse Side 2/1 - Up/Down",
+                "/ - Commands    ESC - Menu",
+                "F1 - Toggle help"
             ]
             y = 15
             for line in help_lines:
-                text = self.font_small.render(line, True, (200, 200, 200))
-                hud_surface.blit(text, (15, y))
-                y += 20
+                shadow = self.font_small.render(line, True, (0, 0, 0))
+                text = self.font_small.render(line, True, (220, 220, 220))
+                hud.blit(shadow, (17, y + 1))
+                hud.blit(text, (15, y))
+                y += 22
 
-        # Paused indicator
-        if self.paused:
+        # Paused
+        if self.paused and not self.menu_open:
             text = self.font_large.render("PAUSED", True, (255, 100, 100))
-            text_rect = text.get_rect(center=(self.width // 2, 50))
-            hud_surface.blit(text, text_rect)
+            rect = text.get_rect(center=(self.width // 2, 50))
+            hud.blit(text, rect)
 
-        # Slow motion indicator
-        if self.time_scale < 1.0:
-            text = self.font_medium.render(f"SLOW-MO {self.time_scale}x", True, (100, 200, 255))
-            hud_surface.blit(text, (self.width // 2 - 60, 80))
+        # Slow motion
+        if self.time_scale < 1.0 and not self.menu_open:
+            text = self.font_medium.render(f"SLOW {self.time_scale}x", True, (100, 200, 255))
+            hud.blit(text, (self.width // 2 - 50, 80))
 
         # Crosshair
-        cx, cy = self.width // 2, self.height // 2
-        pygame.draw.line(hud_surface, (255, 255, 255, 100), (cx - 10, cy), (cx + 10, cy), 1)
-        pygame.draw.line(hud_surface, (255, 255, 255, 100), (cx, cy - 10), (cx, cy + 10), 1)
+        if not self.menu_open:
+            cx, cy = self.width // 2, self.height // 2
+            pygame.draw.line(hud, (255, 255, 255, 150), (cx - 12, cy), (cx + 12, cy), 2)
+            pygame.draw.line(hud, (255, 255, 255, 150), (cx, cy - 12), (cx, cy + 12), 2)
 
-        return hud_surface
+        # Menu
+        if self.menu_open:
+            # Darken background
+            overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 150))
+            hud.blit(overlay, (0, 0))
+
+            # Title
+            title = self.font_large.render("MENU", True, (255, 255, 255))
+            title_rect = title.get_rect(center=(self.width // 2, 280))
+            hud.blit(title, title_rect)
+
+            # Buttons
+            mx, my = pygame.mouse.get_pos()
+
+            # Resume button
+            resume_color = (100, 200, 100) if 550 <= mx <= 850 and 350 <= my <= 400 else (80, 150, 80)
+            pygame.draw.rect(hud, resume_color, (550, 350, 300, 50), border_radius=8)
+            resume_text = self.font_medium.render("Resume", True, (255, 255, 255))
+            hud.blit(resume_text, (self.width // 2 - resume_text.get_width() // 2, 360))
+
+            # Quit button
+            quit_color = (200, 100, 100) if 550 <= mx <= 850 and 420 <= my <= 470 else (150, 80, 80)
+            pygame.draw.rect(hud, quit_color, (550, 420, 300, 50), border_radius=8)
+            quit_text = self.font_medium.render("Quit", True, (255, 255, 255))
+            hud.blit(quit_text, (self.width // 2 - quit_text.get_width() // 2, 430))
+
+        return hud
 
     def render(self):
-        """Main render function"""
-        # Clear and setup 3D
+        """Main render"""
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         self._update_camera()
-
-        # Draw 3D world
-        self._draw_sky()
         self._draw_ground()
         self._draw_table()
         self._draw_racket()
         self._draw_ball()
 
-        # Get OpenGL buffer
-        pygame.display.flip()
-
-        # Draw 2D HUD on top
-        # Switch to 2D mode
+        # HUD overlay
         glMatrixMode(GL_PROJECTION)
         glPushMatrix()
         glLoadIdentity()
@@ -810,17 +771,12 @@ class GameWorld:
         glDisable(GL_DEPTH_TEST)
         glDisable(GL_LIGHTING)
 
-        # Render HUD
         hud = self.render_hud()
         hud_data = pygame.image.tostring(hud, 'RGBA', True)
-
         glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-
         glRasterPos2i(0, self.height)
         glDrawPixels(self.width, self.height, GL_RGBA, GL_UNSIGNED_BYTE, hud_data)
 
-        # Restore 3D mode
         glEnable(GL_DEPTH_TEST)
         glEnable(GL_LIGHTING)
 
@@ -832,28 +788,21 @@ class GameWorld:
         pygame.display.flip()
 
     def run(self):
-        """Main game loop"""
-        print("\n" + "=" * 60)
-        print("  Table Tennis Physics - Interactive Game")
-        print("=" * 60)
-        print("\n  Controls:")
-        print("    WASD        - Move around")
-        print("    Space/Shift - Up/Down")
-        print("    Right Mouse - Look around")
-        print("    T           - Open command console")
-        print("    P           - Pause")
-        print("    R           - Reset")
-        print("    ESC         - Quit")
-        print("\n  Try typing: serve")
-        print("              topspin")
-        print("              ball 0 0 1  then  launch 10 0 3")
-        print("=" * 60 + "\n")
+        """Main loop"""
+        print("\n" + "=" * 50)
+        print("  Table Tennis Physics - Game")
+        print("=" * 50)
+        print("  WASD - Move")
+        print("  Mouse - Look")
+        print("  Mouse Side 2/1 - Up/Down")
+        print("  / - Open chat commands")
+        print("  ESC - Menu")
+        print("=" * 50 + "\n")
 
         while self.running:
             self.handle_events()
             self.handle_movement()
 
-            # Multiple physics steps per frame
             for _ in range(3):
                 self.update_physics()
 
@@ -861,11 +810,11 @@ class GameWorld:
             self.clock.tick(self.fps)
 
         pygame.quit()
-        print("\nGame ended. Thanks for playing!")
+        print("\nGame ended.")
 
 
 def main():
-    print("Starting Table Tennis Game...")
+    print("Starting game...")
     game = GameWorld()
     game.run()
 
