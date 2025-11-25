@@ -35,7 +35,7 @@ from src.physics.collision import CollisionHandler
 class GameWorld:
     """The 3D game world with real-time physics"""
 
-    def __init__(self, width=1400, height=900):
+    def __init__(self, width=1280, height=720):
         self.width = width
         self.height = height
 
@@ -43,8 +43,8 @@ class GameWorld:
         pygame.init()
         pygame.font.init()
 
-        # Create window with OpenGL - use HWSURFACE for less flicker
-        self.screen = pygame.display.set_mode((width, height), DOUBLEBUF | OPENGL | HWSURFACE)
+        # Create resizable window with OpenGL (smaller default size)
+        self.screen = pygame.display.set_mode((width, height), DOUBLEBUF | OPENGL | RESIZABLE)
         pygame.display.set_caption("Table Tennis Simulation - Press / for commands")
 
         # Lock mouse to center for FPS-style control
@@ -104,8 +104,13 @@ class GameWorld:
         self.flight_time = 0
 
         # Mouse button state for up/down
-        self.mouse_side1_held = False  # Button 4 - down
-        self.mouse_side2_held = False  # Button 5 - up
+        self.mouse_side1_held = False  # Button 7 - down
+        self.mouse_side2_held = False  # Button 6 - up
+        
+        # Speed control
+        self.base_speed = 0.08
+        self.speed_min = 0.02
+        self.speed_max = 0.3
 
         # Clock
         self.clock = pygame.time.Clock()
@@ -636,18 +641,35 @@ class GameWorld:
                     if event.button not in [1, 2, 3]:
                         self.add_output(f"Mouse btn {event.button} down")
 
-                    # Mouse side buttons - try multiple common mappings
-                    # X1 (back) = 4 or 6 or 8, X2 (forward) = 5 or 7 or 9
-                    if event.button in [4, 6, 8]:
-                        self.mouse_side1_held = True
-                    elif event.button in [5, 7, 9]:
-                        self.mouse_side2_held = True
+                    # Mouse side buttons
+                    # Button 6 = up, Button 7 = down
+                    if event.button == 7:
+                        self.mouse_side1_held = True  # down
+                    elif event.button == 6:
+                        self.mouse_side2_held = True  # up
+                    # Button 4 = accelerate, Button 5 = decelerate
+                    elif event.button == 4:
+                        self.camera_speed = min(self.speed_max, self.camera_speed * 1.5)
+                        self.add_output(f"Speed: {self.camera_speed:.2f}")
+                    elif event.button == 5:
+                        self.camera_speed = max(self.speed_min, self.camera_speed / 1.5)
+                        self.add_output(f"Speed: {self.camera_speed:.2f}")
 
             elif event.type == MOUSEBUTTONUP:
-                if event.button in [4, 6, 8]:
+                if event.button == 7:
                     self.mouse_side1_held = False
-                elif event.button in [5, 7, 9]:
+                elif event.button == 6:
                     self.mouse_side2_held = False
+
+            elif event.type == VIDEORESIZE:
+                # Handle window resize
+                self.width, self.height = event.w, event.h
+                self.screen = pygame.display.set_mode((self.width, self.height), DOUBLEBUF | OPENGL | RESIZABLE)
+                glViewport(0, 0, self.width, self.height)
+                glMatrixMode(GL_PROJECTION)
+                glLoadIdentity()
+                gluPerspective(60, self.width / self.height, 0.1, 100.0)
+                glMatrixMode(GL_MODELVIEW)
 
         return self.running
 
@@ -724,6 +746,7 @@ class GameWorld:
                 f"XYZ: {self.camera_pos[0]:.3f} / {self.camera_pos[1]:.3f} / {self.camera_pos[2]:.3f}",
                 f"Facing: {facing}",
                 f"Rotation: {yaw:.1f} / {pitch:.1f}",
+                f"Player Speed: {self.camera_speed:.2f}",
                 f"",
                 f"FPS: {fps:.0f}",
                 f"Time Scale: {self.time_scale}x",
