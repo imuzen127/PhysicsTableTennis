@@ -30,6 +30,8 @@ from src.physics.ball import Ball
 from src.physics.table import Table
 from src.physics.racket import Racket
 from src.physics.collision import CollisionHandler
+from src.command.parser import CommandParser, yup_to_zup, zup_to_yup
+from src.command.objects import EntityManager, BallEntity, RacketEntity
 
 
 class GameWorld:
@@ -65,6 +67,10 @@ class GameWorld:
         self.racket = Racket(self.params, side=-1)
         self.collision = CollisionHandler(self.params)
 
+        # New command system
+        self.entity_manager = EntityManager()
+        self.command_parser = None  # Initialized after self is ready
+
         # Ball state
         self.ball_active = False
         self.ball_trail = []
@@ -83,6 +89,7 @@ class GameWorld:
         # Console/Chat state
         self.console_open = False
         self.console_input = ""
+        self.console_cursor = 0  # Cursor position in input
         self.console_history = []
         self.history_index = -1
         self.console_output = []
@@ -121,7 +128,10 @@ class GameWorld:
 
         # Welcome message
         self.add_output("Welcome! Press / to type commands")
-        self.add_output("Try: serve  or  topspin")
+        self.add_output("Try: summon ball ~ ~1 ~ or start")
+
+        # Initialize command parser (needs self reference)
+        self.command_parser = CommandParser(self)
 
     def _init_gl(self):
         """Initialize OpenGL"""
@@ -396,6 +406,10 @@ class GameWorld:
             self.add_output("Out of bounds!")
             self.ball_active = False
 
+        # Update entity manager (new system)
+        if self.entity_manager.simulation_running:
+            self.entity_manager.update(dt, self.params)
+
     def handle_movement(self):
         """Handle player movement"""
         if self.console_open or self.menu_open:
@@ -433,9 +447,10 @@ class GameWorld:
         self.camera_pitch = max(-80, min(80, self.camera_pitch))
 
     def process_command(self, cmd):
-        """Process command"""
-        cmd = cmd.strip().lower()
-        parts = cmd.split()
+        """Process command - supports both old and new Minecraft-style commands"""
+        cmd_original = cmd.strip()
+        cmd_lower = cmd_original.lower()
+        parts = cmd_lower.split()
         if not parts:
             return
 
@@ -443,7 +458,25 @@ class GameWorld:
         args = parts[1:]
 
         try:
-            if command in ['ball', 'b']:
+            # New Minecraft-style commands (case-sensitive for NBT)
+            if command in ['summon', 'execute', 'kill']:
+                result = self.command_parser.parse(cmd_original)
+                self._handle_parsed_command(result)
+                return
+
+            elif command == 'start':
+                self.entity_manager.start()
+                count = len(self.entity_manager.entities)
+                self.add_output(f"Started simulation ({count} entities)")
+                return
+
+            elif command == 'stop':
+                self.entity_manager.stop()
+                self.add_output("Stopped simulation")
+                return
+
+            # Legacy commands (kept for compatibility)
+            elif command in ['ball', 'b']:
                 if len(args) >= 3:
                     pos = np.array([float(args[0]), float(args[1]), float(args[2])])
                     self.ball.reset(position=pos)
@@ -523,6 +556,7 @@ class GameWorld:
                 self.bounce_markers = []
                 self.bounces = 0
                 self.flight_time = 0
+                self.entity_manager.kill('@e')
                 self.add_output("Reset!")
 
             elif command in ['tp', 'teleport']:
@@ -537,7 +571,8 @@ class GameWorld:
                     self.add_output("TP to table view")
 
             elif command in ['help', 'h', '?']:
-                self.add_output("ball, launch, spin, serve, slow, tp, reset")
+                self.add_output("summon, start, stop, kill, tp, reset")
+                self.add_output("ball, launch, spin, serve, slow")
 
             elif command in ['clear', 'cls']:
                 self.console_output = []
@@ -563,6 +598,36 @@ class GameWorld:
         except Exception as e:
             self.add_output(f"Error: {e}")
 
+    def _handle_parsed_command(self, result):
+        """Handle parsed command from new command system"""
+        cmd_type = result.get('type')
+
+        if cmd_type == 'summon':
+            args = result['args']
+            entity = self.entity_manager.summon(
+                args['entity'],
+                args['position'],
+                args['nbt']
+            )
+            pos = args['position']
+            self.add_output(f"Summoned {args['entity']} [{entity.id}] at ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f})")
+
+        elif cmd_type == 'kill':
+            selector = result['args']['selector']
+            count = self.entity_manager.kill(selector)
+            self.add_output(f"Killed {count} entities")
+
+        elif cmd_type == 'start':
+            self.entity_manager.start()
+            self.add_output("Started simulation")
+
+        elif cmd_type == 'error':
+            self.add_output(result.get('message', 'Error'))
+
+        elif cmd_type == 'unknown':
+            self.add_output(f"Unknown command: {result.get('raw', '')}")
+
+
     def add_output(self, text):
         """Add console output"""
         self.console_output.append(text)
@@ -577,32 +642,51 @@ class GameWorld:
 
             elif event.type == KEYDOWN:
                 if self.console_open:
-                    # Chat input mode
+                    # Chat input mode with cursor support
                     if event.key == K_RETURN:
                         if self.console_input:
                             self.console_history.append(self.console_input)
                             self.process_command(self.console_input)
                             self.console_input = ""
+                            self.console_cursor = 0
                         self.console_open = False
                     elif event.key == K_ESCAPE or event.key == K_SLASH:
                         self.console_open = False
                         self.console_input = ""
+                        self.console_cursor = 0
                     elif event.key == K_BACKSPACE:
-                        self.console_input = self.console_input[:-1]
+                        if self.console_cursor > 0:
+                            self.console_input = self.console_input[:self.console_cursor-1] + self.console_input[self.console_cursor:]
+                            self.console_cursor -= 1
+                    elif event.key == K_DELETE:
+                        if self.console_cursor < len(self.console_input):
+                            self.console_input = self.console_input[:self.console_cursor] + self.console_input[self.console_cursor+1:]
+                    elif event.key == K_LEFT:
+                        self.console_cursor = max(0, self.console_cursor - 1)
+                    elif event.key == K_RIGHT:
+                        self.console_cursor = min(len(self.console_input), self.console_cursor + 1)
+                    elif event.key == K_HOME:
+                        self.console_cursor = 0
+                    elif event.key == K_END:
+                        self.console_cursor = len(self.console_input)
                     elif event.key == K_UP and self.console_history:
                         if self.history_index < len(self.console_history) - 1:
                             self.history_index += 1
                             self.console_input = self.console_history[-(self.history_index + 1)]
+                            self.console_cursor = len(self.console_input)
                     elif event.key == K_DOWN:
                         if self.history_index > 0:
                             self.history_index -= 1
                             self.console_input = self.console_history[-(self.history_index + 1)]
+                            self.console_cursor = len(self.console_input)
                         else:
                             self.history_index = -1
                             self.console_input = ""
+                            self.console_cursor = 0
                     else:
                         if event.unicode and event.unicode.isprintable() and event.unicode != '/':
-                            self.console_input += event.unicode
+                            self.console_input = self.console_input[:self.console_cursor] + event.unicode + self.console_input[self.console_cursor:]
+                            self.console_cursor += 1
 
                 elif self.menu_open:
                     # Menu mode
@@ -616,6 +700,7 @@ class GameWorld:
                     if event.key == K_SLASH:
                         self.console_open = True
                         self.history_index = -1
+                        self.console_cursor = 0
                     elif event.key == K_ESCAPE:
                         self.menu_open = True
                         pygame.mouse.set_visible(True)
@@ -687,11 +772,16 @@ class GameWorld:
             hud.blit(text, (15, y))
             y += 24
 
-        # Console input
+        # Console input with cursor
         if self.console_open:
             pygame.draw.rect(hud, (0, 0, 0, 220), (10, self.height - 45, self.width - 20, 40))
             pygame.draw.rect(hud, (80, 80, 80), (10, self.height - 45, self.width - 20, 40), 2)
-            input_text = f"/{self.console_input}_"
+            # Show cursor at position
+            before_cursor = "/" + self.console_input[:self.console_cursor]
+            after_cursor = self.console_input[self.console_cursor:]
+            # Blinking cursor
+            cursor_char = "|" if (pygame.time.get_ticks() // 500) % 2 == 0 else ""
+            input_text = before_cursor + cursor_char + after_cursor
             text = self.font_medium.render(input_text, True, (100, 255, 100))
             hud.blit(text, (20, self.height - 40))
         else:
@@ -838,6 +928,70 @@ class GameWorld:
 
         return hud
 
+    def _draw_entities(self):
+        """Draw all entities from entity manager"""
+        # Draw balls
+        for ball in self.entity_manager.balls:
+            # Convert Y-up to Z-up for rendering
+            pos = yup_to_zup(ball.position)
+
+            # Draw trail
+            if len(ball.trail) > 1:
+                glDisable(GL_LIGHTING)
+                glLineWidth(3.0)
+                glBegin(GL_LINE_STRIP)
+                for i, trail_pos in enumerate(ball.trail):
+                    alpha = (i / len(ball.trail)) ** 0.5
+                    glColor4f(0.0, 0.8, 1.0, alpha * 0.7)
+                    render_pos = yup_to_zup(trail_pos)
+                    glVertex3f(*render_pos)
+                glEnd()
+                glEnable(GL_LIGHTING)
+
+            # Draw ball
+            if ball.active:
+                glColor3f(0.0, 0.8, 1.0)  # Cyan for new balls
+            else:
+                glColor4f(0.0, 0.8, 1.0, 0.5)
+            glPushMatrix()
+            glTranslatef(*pos)
+            quadric = gluNewQuadric()
+            gluSphere(quadric, ball.radius, 20, 20)
+            gluDeleteQuadric(quadric)
+            glPopMatrix()
+
+        # Draw rackets
+        for racket in self.entity_manager.rackets:
+            pos = yup_to_zup(racket.position)
+            glPushMatrix()
+            glTranslatef(*pos)
+
+            # Handle
+            glColor3f(0.4, 0.3, 0.2)
+            glPushMatrix()
+            glRotatef(90, 1, 0, 0)
+            quadric = gluNewQuadric()
+            gluCylinder(quadric, 0.015, 0.012, 0.15, 8, 1)
+            gluDeleteQuadric(quadric)
+            glPopMatrix()
+
+            # Blade - color based on rubber type
+            if racket.rubber.type == "inverted":
+                glColor3f(0.8, 0.1, 0.1)  # Red
+            elif racket.rubber.type == "pimples":
+                glColor3f(0.1, 0.1, 0.8)  # Blue
+            else:
+                glColor3f(0.2, 0.2, 0.2)  # Black (anti)
+
+            glPushMatrix()
+            glScalef(0.085, 0.08, 0.008)
+            quadric = gluNewQuadric()
+            gluSphere(quadric, 1.0, 16, 8)
+            gluDeleteQuadric(quadric)
+            glPopMatrix()
+
+            glPopMatrix()
+
     def render(self):
         """Main render"""
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -847,6 +1001,7 @@ class GameWorld:
         self._draw_table()
         self._draw_racket()
         self._draw_ball()
+        self._draw_entities()  # Draw new entity system objects
 
         # HUD overlay
         glMatrixMode(GL_PROJECTION)
