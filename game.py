@@ -422,7 +422,8 @@ class GameWorld:
         yaw_rad = math.radians(self.camera_yaw)
         # Y-up: forward is in XZ plane
         forward = np.array([math.cos(yaw_rad), 0, math.sin(yaw_rad)])
-        right = np.array([math.sin(yaw_rad), 0, -math.cos(yaw_rad)])
+        # right = forward × up (cross product for right-hand coordinate system)
+        right = np.array([-math.sin(yaw_rad), 0, math.cos(yaw_rad)])
 
         # WASD movement
         if keys[K_w]:
@@ -445,7 +446,7 @@ class GameWorld:
 
         # Mouse look (always active when not in menu/console)
         rel = pygame.mouse.get_rel()
-        self.camera_yaw -= rel[0] * self.mouse_sensitivity  # Fixed: inverted
+        self.camera_yaw += rel[0] * self.mouse_sensitivity  # Y-up: positive = right turn
         self.camera_pitch -= rel[1] * self.mouse_sensitivity
         self.camera_pitch = max(-80, min(80, self.camera_pitch))
 
