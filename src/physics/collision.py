@@ -2,6 +2,8 @@
 Collision detection and response module
 
 Handles all collision events in the simulation
+
+Coordinate System: Y-up (X horizontal, Y height, Z horizontal)
 """
 
 import numpy as np
@@ -53,7 +55,7 @@ class CollisionHandler:
 
         if is_collision:
             # ボールをテーブル面に配置
-            ball.position[2] = table.bounds['z'] + self.params.ball_radius
+            ball.position[1] = table.bounds['y'] + self.params.ball_radius
 
             # 速度の法線成分と接線成分に分解
             velocity = ball.velocity
@@ -186,12 +188,12 @@ class CollisionHandler:
             out_of_bounds: 場外かどうか
         """
         # 地面に落ちた
-        if ball.position[2] < 0:
+        if ball.position[1] < 0:
             return True
 
-        # テーブルから大きく離れた
+        # テーブルから大きく離れた (XZ平面)
         distance_from_table = np.linalg.norm(
-            ball.position[:2] - np.array([0, 0])
+            ball.position[[0, 2]] - np.array([0, 0])
         )
         if distance_from_table > 5.0:  # 5m以上離れたら場外
             return True

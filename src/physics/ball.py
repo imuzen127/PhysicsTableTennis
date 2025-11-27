@@ -7,6 +7,8 @@ Implements ball dynamics including:
 - Magnus effect (accurate model)
 - Air resistance
 - Spin decay
+
+Coordinate System: Y-up (X horizontal, Y height, Z horizontal)
 """
 
 import numpy as np
@@ -23,7 +25,7 @@ class Ball:
         spin: np.ndarray = None
     ):
         self.params = params
-        self.position = np.array(position, dtype=float) if position is not None else np.array([0.0, 0.0, 1.0])
+        self.position = np.array(position, dtype=float) if position is not None else np.array([0.0, 1.0, 0.0])
         self.velocity = np.array(velocity, dtype=float) if velocity is not None else np.array([0.0, 0.0, 0.0])
         self.spin = np.array(spin, dtype=float) if spin is not None else np.array([0.0, 0.0, 0.0])
         self.trajectory = [self.position.copy()]
@@ -60,7 +62,7 @@ class Ball:
         return min(Cl, 0.6) * self.params.spin.magnus_coefficient
 
     def compute_gravity_force(self) -> np.ndarray:
-        return np.array([0.0, 0.0, -self.params.ball_mass * self.params.gravity])
+        return np.array([0.0, -self.params.ball_mass * self.params.gravity, 0.0])
 
     def compute_drag_force(self) -> np.ndarray:
         speed = np.linalg.norm(self.velocity)
@@ -142,12 +144,12 @@ class Ball:
 
 
 def create_topspin_ball(params: PhysicsParameters, speed: float = 15.0, spin_rpm: float = 3000.0):
-    velocity = np.array([speed, 0.0, 2.0])
-    spin = np.array([0.0, spin_rpm * 2 * np.pi / 60.0, 0.0])
-    return Ball(params, position=np.array([-1.0, 0.0, 0.9]), velocity=velocity, spin=spin)
+    velocity = np.array([speed, 2.0, 0.0])
+    spin = np.array([0.0, 0.0, spin_rpm * 2 * np.pi / 60.0])
+    return Ball(params, position=np.array([-1.0, 0.9, 0.0]), velocity=velocity, spin=spin)
 
 
 def create_backspin_ball(params: PhysicsParameters, speed: float = 10.0, spin_rpm: float = 2000.0):
-    velocity = np.array([speed, 0.0, 3.0])
-    spin = np.array([0.0, -spin_rpm * 2 * np.pi / 60.0, 0.0])
-    return Ball(params, position=np.array([-1.0, 0.0, 0.9]), velocity=velocity, spin=spin)
+    velocity = np.array([speed, 3.0, 0.0])
+    spin = np.array([0.0, 0.0, -spin_rpm * 2 * np.pi / 60.0])
+    return Ball(params, position=np.array([-1.0, 0.9, 0.0]), velocity=velocity, spin=spin)

@@ -3,6 +3,8 @@ Racket physics module
 
 Implements racket dynamics and collision with ball
 Including detailed rubber properties
+
+Coordinate System: Y-up (X horizontal, Y height, Z horizontal)
 """
 
 import numpy as np
@@ -24,7 +26,8 @@ class Racket:
         self.is_forehand = is_forehand
         
         default_x = side * (params.table_length / 2 + 0.5)
-        self.position = np.array(position, dtype=float) if position is not None else np.array([default_x, 0.0, 1.0])
+        # Y-up: [x, height, z]
+        self.position = np.array(position, dtype=float) if position is not None else np.array([default_x, 1.0, 0.0])
         
         default_normal = np.array([-side, 0.0, 0.0], dtype=float)
         self.orientation = np.array(orientation, dtype=float) if orientation is not None else default_normal

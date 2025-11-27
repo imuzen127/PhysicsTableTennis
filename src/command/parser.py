@@ -3,15 +3,28 @@ Minecraft-style command parser with NBT data support.
 
 Coordinate Systems:
 - World: X (horizontal), Y (height/up), Z (horizontal)
-- ~ ~ ~ : Relative to player position
+- ~ ~ ~ : Relative to player position (default if omitted)
 - ^ ^ ^ : Local coordinates (left/up/forward based on player facing)
 
-NBT Syntax:
-{key:value, key2:[array], key3:{nested}}
+NBT Parameters:
+| Parameter    | Description      | Default              | Unit    |
+|-------------|------------------|----------------------|---------|
+| velocity    | Velocity         | 0                    | m/s     |
+| acceleration| Acceleration     | 0                    | m/s^2   |
+| mass        | Mass             | 2.7 (ball), 180 (racket) | g   |
+| radius      | Radius           | 20                   | mm      |
+| coefficient | Friction coeff   | [0.8, 0.8]           | [red, black] |
+| rotation    | Orientation      | {angle:0, axis:[0,1,0]} | rad  |
+| spin        | Spin             | {rpm:0, axis:[0,1,0]} | RPM    |
 
-Example Commands:
-summon ball ~ ~1 ~ {velocity:{rotation:[@s], speed:15}, spin:[0,100,0]}
-execute rotate as @s run summon racket ^0 ^0 ^1 {velocity:{rotation:@s, speed:10}}
+Commands:
+- summon ball [x y z] [nbt]  (default: ~ ~ ~)
+- summon racket [x y z] [nbt]
+- execute rotate as @s run <cmd>
+- execute at @n[type=ball] run <cmd>
+- start / stop
+- kill <selector>
+- gamemode gravity <value>
 """
 
 import re
@@ -140,7 +153,7 @@ class NBTParser:
         return result
 
     def _parse_selector(self) -> str:
-        """Parse @s, @e, etc."""
+        """Parse @s, @e, @n[type=ball], etc."""
         start = self.pos
         self.pos += 1  # skip '@'
 
@@ -272,7 +285,8 @@ class CoordinateParser:
 
         # Left vector (perpendicular to forward and up)
         left_vec = np.cross(up_vec, forward_vec)
-        left_vec = left_vec / np.linalg.norm(left_vec)
+        if np.linalg.norm(left_vec) > 0:
+            left_vec = left_vec / np.linalg.norm(left_vec)
 
         # Calculate world position
         return self.player_pos + left * left_vec + up * up_vec + forward * forward_vec
@@ -285,7 +299,7 @@ class VelocityParser:
         self.player_yaw = player_yaw
         self.player_pitch = player_pitch
 
-    def parse(self, data: Dict[str, Any]) -> np.ndarray:
+    def parse(self, data: Any) -> np.ndarray:
         """
         Parse velocity data to vector.
 
@@ -293,7 +307,19 @@ class VelocityParser:
         - {rotation:[yaw, pitch], speed:N}
         - {rotation:@s, speed:N}
         - [vx, vy, vz] (direct vector)
+        - N (scalar, uses player direction)
         """
+        if isinstance(data, (int, float)):
+            # Scalar value - use player direction
+            speed = float(data)
+            yaw_rad = math.radians(self.player_yaw)
+            pitch_rad = math.radians(self.player_pitch)
+            return np.array([
+                speed * math.cos(yaw_rad) * math.cos(pitch_rad),
+                speed * math.sin(pitch_rad),
+                speed * math.sin(yaw_rad) * math.cos(pitch_rad)
+            ])
+
         if isinstance(data, list):
             return np.array(data, dtype=float)
 
@@ -325,6 +351,73 @@ class VelocityParser:
         return np.array([vx, vy, vz])
 
 
+class RotationParser:
+    """Parse rotation with angle+axis format"""
+
+    @staticmethod
+    def parse(data: Any) -> Tuple[float, np.ndarray]:
+        """
+        Parse rotation data to (angle, axis).
+
+        Formats:
+        - {angle:1.57, axis:[1,0,0]}
+        - [angle, ax, ay, az]
+
+        Returns:
+            (angle in radians, normalized axis vector)
+        """
+        if isinstance(data, list) and len(data) >= 4:
+            angle = float(data[0])
+            axis = np.array(data[1:4], dtype=float)
+        elif isinstance(data, dict):
+            angle = float(data.get('angle', 0))
+            axis = np.array(data.get('axis', [0, 1, 0]), dtype=float)
+        else:
+            return 0.0, np.array([0, 1, 0])
+
+        # Normalize axis
+        norm = np.linalg.norm(axis)
+        if norm > 0:
+            axis = axis / norm
+
+        return angle, axis
+
+
+class SpinParser:
+    """Parse spin with rpm+axis format"""
+
+    @staticmethod
+    def parse(data: Any) -> np.ndarray:
+        """
+        Parse spin data to angular velocity vector (rad/s).
+
+        Formats:
+        - {rpm:3000, axis:[0,1,0]}
+        - [wx, wy, wz] (rad/s direct)
+
+        Returns:
+            Angular velocity vector [wx, wy, wz] in rad/s
+        """
+        if isinstance(data, list):
+            return np.array(data, dtype=float)
+
+        if isinstance(data, dict):
+            rpm = float(data.get('rpm', 0))
+            axis = np.array(data.get('axis', [0, 1, 0]), dtype=float)
+
+            # Normalize axis
+            norm = np.linalg.norm(axis)
+            if norm > 0:
+                axis = axis / norm
+
+            # Convert RPM to rad/s
+            omega = rpm * 2 * math.pi / 60
+
+            return axis * omega
+
+        return np.zeros(3)
+
+
 class CommandParser:
     """Main command parser with execute support"""
 
@@ -338,12 +431,14 @@ class CommandParser:
 
         # Execute context
         self.execute_rotation = None  # Override rotation from 'execute rotate'
+        self.execute_position = None  # Override position from 'execute at'
 
     def get_player_pos_yup(self) -> np.ndarray:
         """Get player position in Y-up coordinate system"""
-        # Convert from Z-up to Y-up: [x, y, z] -> [x, z, y]
-        pos = self.game.camera_pos
-        return np.array([pos[0], pos[2], pos[1]])
+        if self.execute_position is not None:
+            return self.execute_position
+        # Camera is now directly in Y-up coordinates
+        return self.game.camera_pos.copy()
 
     def get_player_yaw(self) -> float:
         """Get player yaw (handle execute rotate override)"""
@@ -357,16 +452,29 @@ class CommandParser:
             return self.execute_rotation[1]
         return self.game.camera_pitch
 
-    def parse(self, command: str) -> Dict[str, Any]:
-        """
-        Parse command string.
+    def _find_nearest_entity(self, entity_type: str) -> Optional[np.ndarray]:
+        """Find nearest entity of type and return its position"""
+        player_pos = self.get_player_pos_yup()
+        nearest_dist = float('inf')
+        nearest_pos = None
 
-        Returns:
-            {
-                'type': 'summon'|'execute'|'start'|'kill'|...,
-                'args': {...}
-            }
-        """
+        if entity_type == 'ball':
+            entities = self.game.entity_manager.balls
+        elif entity_type == 'racket':
+            entities = self.game.entity_manager.rackets
+        else:
+            return None
+
+        for entity in entities:
+            dist = np.linalg.norm(entity.position - player_pos)
+            if dist < nearest_dist:
+                nearest_dist = dist
+                nearest_pos = entity.position.copy()
+
+        return nearest_pos
+
+    def parse(self, command: str) -> Dict[str, Any]:
+        """Parse command string."""
         command = command.strip()
 
         # Handle execute command
@@ -381,9 +489,17 @@ class CommandParser:
         if command == 'start' or command.startswith('start '):
             return {'type': 'start', 'args': {}}
 
+        # Handle stop command
+        if command == 'stop' or command.startswith('stop '):
+            return {'type': 'stop', 'args': {}}
+
         # Handle kill command
         if command.startswith('kill '):
             return self._parse_kill(command[5:])
+
+        # Handle gamemode command
+        if command.startswith('gamemode '):
+            return self._parse_gamemode(command[9:])
 
         # Handle other commands
         return {'type': 'unknown', 'raw': command}
@@ -404,18 +520,53 @@ class CommandParser:
 
             return inner_result
 
+        # execute at @n[type=ball] run <command>
+        match = re.match(r'at\s+@n\[type=(\w+)\]\s+run\s+(.+)', rest)
+        if match:
+            entity_type = match.group(1)
+            inner_cmd = match.group(2)
+
+            # Find nearest entity
+            nearest_pos = self._find_nearest_entity(entity_type)
+            if nearest_pos is None:
+                return {'type': 'error', 'message': f'No {entity_type} found'}
+
+            # Set position override
+            self.execute_position = nearest_pos
+
+            # Parse inner command
+            inner_result = self.parse(inner_cmd)
+
+            # Clear position override
+            self.execute_position = None
+
+            return inner_result
+
         return {'type': 'unknown', 'raw': f'execute {rest}'}
 
     def _parse_summon(self, rest: str) -> Dict[str, Any]:
-        """Parse summon command: summon <entity> <x> <y> <z> [nbt]"""
-        parts = rest.split(None, 4)  # Split into at most 5 parts
+        """Parse summon command: summon <entity> [x y z] [nbt]"""
+        # Find NBT part (starts with {)
+        nbt_start = rest.find('{')
+        if nbt_start != -1:
+            coords_part = rest[:nbt_start].strip()
+            nbt_str = rest[nbt_start:]
+        else:
+            coords_part = rest.strip()
+            nbt_str = '{}'
 
-        if len(parts) < 4:
-            return {'type': 'error', 'message': 'Usage: summon <ball|racket> <x> <y> <z> [nbt]'}
+        parts = coords_part.split()
+
+        if len(parts) < 1:
+            return {'type': 'error', 'message': 'Usage: summon <ball|racket> [x y z] [nbt]'}
 
         entity_type = parts[0]
-        x_str, y_str, z_str = parts[1], parts[2], parts[3]
-        nbt_str = parts[4] if len(parts) > 4 else '{}'
+
+        # Default coordinates: ~ ~ ~
+        if len(parts) >= 4:
+            x_str, y_str, z_str = parts[1], parts[2], parts[3]
+        else:
+            x_str, y_str, z_str = '~', '~', '~'
 
         # Parse coordinates
         coord_parser = CoordinateParser(
@@ -428,15 +579,34 @@ class CommandParser:
         # Parse NBT
         nbt = self.nbt_parser.parse(nbt_str)
 
+        # Process NBT values
+        vel_parser = VelocityParser(self.get_player_yaw(), self.get_player_pitch())
+
         # Parse velocity if present
         if 'velocity' in nbt:
-            vel_parser = VelocityParser(self.get_player_yaw(), self.get_player_pitch())
             nbt['velocity'] = vel_parser.parse(nbt['velocity'])
 
         # Parse acceleration if present
         if 'acceleration' in nbt:
-            vel_parser = VelocityParser(self.get_player_yaw(), self.get_player_pitch())
             nbt['acceleration'] = vel_parser.parse(nbt['acceleration'])
+
+        # Parse spin if present
+        if 'spin' in nbt:
+            nbt['spin'] = SpinParser.parse(nbt['spin'])
+
+        # Parse rotation if present
+        if 'rotation' in nbt:
+            angle, axis = RotationParser.parse(nbt['rotation'])
+            nbt['rotation'] = {'angle': angle, 'axis': axis}
+
+        # Convert units
+        # mass: g -> kg
+        if 'mass' in nbt:
+            nbt['mass'] = float(nbt['mass']) / 1000.0
+
+        # radius: mm -> m
+        if 'radius' in nbt:
+            nbt['radius'] = float(nbt['radius']) / 1000.0
 
         return {
             'type': 'summon',
@@ -454,6 +624,24 @@ class CommandParser:
             'type': 'kill',
             'args': {
                 'selector': selector
+            }
+        }
+
+    def _parse_gamemode(self, rest: str) -> Dict[str, Any]:
+        """Parse gamemode command: gamemode gravity <value>"""
+        parts = rest.strip().split()
+
+        if len(parts) < 2:
+            return {'type': 'error', 'message': 'Usage: gamemode gravity <value>'}
+
+        setting = parts[0]
+        value = float(parts[1])
+
+        return {
+            'type': 'gamemode',
+            'args': {
+                'setting': setting,
+                'value': value
             }
         }
 

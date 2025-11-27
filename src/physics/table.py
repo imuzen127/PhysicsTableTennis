@@ -2,6 +2,8 @@
 Table tennis table module
 
 Implements table geometry and collision detection
+
+Coordinate System: Y-up (X length, Y height, Z width)
 """
 
 import numpy as np
@@ -29,13 +31,13 @@ class Table:
         self.height = params.table_height  # 0.76 m
 
         # テーブルの中心を原点とする
-        # X軸: 長さ方向、Y軸: 幅方向、Z軸: 高さ方向
+        # X軸: 長さ方向、Y軸: 高さ方向、Z軸: 幅方向
         self.bounds = {
             'x_min': -self.length / 2,
             'x_max': self.length / 2,
-            'y_min': -self.width / 2,
-            'y_max': self.width / 2,
-            'z': self.height
+            'y': self.height,
+            'z_min': -self.width / 2,
+            'z_max': self.width / 2
         }
 
         # ネットの位置（テーブル中央）
@@ -62,11 +64,11 @@ class Table:
 
         # テーブル面との衝突（上から）
         if (self.bounds['x_min'] <= x <= self.bounds['x_max'] and
-            self.bounds['y_min'] <= y <= self.bounds['y_max'] and
-            z - radius <= self.bounds['z'] and z > self.bounds['z']):
+            self.bounds['z_min'] <= z <= self.bounds['z_max'] and
+            y - radius <= self.bounds['y'] and y > self.bounds['y']):
 
             # 法線ベクトル（上向き）
-            normal = np.array([0.0, 0.0, 1.0])
+            normal = np.array([0.0, 1.0, 0.0])
             return True, normal
 
         return False, None
@@ -97,9 +99,9 @@ class Table:
 
         if crossed_net:
             # ネットの高さより下で、テーブル幅内
-            net_top_z = self.bounds['z'] + self.net_height
-            if (z <= net_top_z and
-                self.bounds['y_min'] <= y <= self.bounds['y_max']):
+            net_top_y = self.bounds['y'] + self.net_height
+            if (y <= net_top_y and
+                self.bounds['z_min'] <= z <= self.bounds['z_max']):
 
                 # 法線ベクトル（ボールの進行方向の反対）
                 direction = np.sign(x - x_prev)
@@ -121,24 +123,24 @@ class Table:
         x, y, z = position
 
         return (self.bounds['x_min'] <= x <= self.bounds['x_max'] and
-                self.bounds['y_min'] <= y <= self.bounds['y_max'] and
-                abs(z - self.bounds['z']) < 0.1)
+                self.bounds['z_min'] <= z <= self.bounds['z_max'] and
+                abs(y - self.bounds['y']) < 0.1)
 
     def get_corner_positions(self) -> np.ndarray:
         """テーブルの4隅の座標を取得"""
         corners = np.array([
-            [self.bounds['x_min'], self.bounds['y_min'], self.bounds['z']],
-            [self.bounds['x_max'], self.bounds['y_min'], self.bounds['z']],
-            [self.bounds['x_max'], self.bounds['y_max'], self.bounds['z']],
-            [self.bounds['x_min'], self.bounds['y_max'], self.bounds['z']],
+            [self.bounds['x_min'], self.bounds['y'], self.bounds['z_min']],
+            [self.bounds['x_max'], self.bounds['y'], self.bounds['z_min']],
+            [self.bounds['x_max'], self.bounds['y'], self.bounds['z_max']],
+            [self.bounds['x_min'], self.bounds['y'], self.bounds['z_max']],
         ])
         return corners
 
     def get_net_positions(self) -> Tuple[np.ndarray, np.ndarray]:
         """ネットの両端の座標を取得"""
-        net_top = self.bounds['z'] + self.net_height
-        start = np.array([self.net_position, self.bounds['y_min'], self.bounds['z']])
-        end = np.array([self.net_position, self.bounds['y_max'], net_top])
+        net_top = self.bounds['y'] + self.net_height
+        start = np.array([self.net_position, self.bounds['y'], self.bounds['z_min']])
+        end = np.array([self.net_position, net_top, self.bounds['z_max']])
         return start, end
 
     def __repr__(self) -> str:

@@ -28,6 +28,13 @@ class RubberData:
 
 
 @dataclass
+class CoefficientData:
+    """Friction coefficients for racket [red_side, black_side]"""
+    red: float = 0.8
+    black: float = 0.8
+
+
+@dataclass
 class VelocityData:
     """Velocity with rotation-based definition"""
     vector: np.ndarray = field(default_factory=lambda: np.zeros(3))
@@ -55,6 +62,9 @@ class BallEntity(GameEntity):
     mass: float = 0.0027  # 2.7g
     trail: List[np.ndarray] = field(default_factory=list)
     bounce_count: int = 0
+    # Orientation (angle-axis representation)
+    orientation_angle: float = 0.0  # Rotation angle in radians
+    orientation_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))  # Default: Y-up
 
 
 @dataclass
@@ -64,6 +74,9 @@ class RacketEntity(GameEntity):
     acceleration: np.ndarray = field(default_factory=lambda: np.zeros(3))
     mass: float = 0.18  # 180g typical
     rubber: RubberData = field(default_factory=RubberData)
+    coefficient: CoefficientData = field(default_factory=CoefficientData)  # [red, black] friction
+    orientation_angle: float = 0.0  # Rotation angle in radians
+    orientation_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))  # Rotation axis
     # Swing state
     swing_active: bool = False
     swing_time: float = 0.0
@@ -132,6 +145,20 @@ class EntityManager:
         if 'radius' in nbt:
             ball.radius = float(nbt['radius'])
 
+        # Orientation (rotation: {angle:..., axis:...})
+        if 'rotation' in nbt:
+            rot = nbt['rotation']
+            if isinstance(rot, dict):
+                ball.orientation_angle = float(rot.get('angle', 0))
+                axis = rot.get('axis', [0, 1, 0])
+                if isinstance(axis, np.ndarray):
+                    ball.orientation_axis = axis.copy()
+                else:
+                    ball.orientation_axis = np.array(axis, dtype=float)
+                norm = np.linalg.norm(ball.orientation_axis)
+                if norm > 0:
+                    ball.orientation_axis = ball.orientation_axis / norm
+
         return ball
 
     def _create_racket(self, position: np.ndarray, nbt: Dict[str, Any]) -> RacketEntity:
@@ -170,6 +197,23 @@ class EntityManager:
                 spin_coefficient=float(rubber_data.get('spin', 1.0)),
                 restitution=float(rubber_data.get('restitution', 0.85))
             )
+
+        # Coefficient [red, black] friction
+        if 'coefficient' in nbt:
+            coeff = nbt['coefficient']
+            if isinstance(coeff, list) and len(coeff) >= 2:
+                racket.coefficient = CoefficientData(
+                    red=float(coeff[0]),
+                    black=float(coeff[1])
+                )
+
+        # Rotation (angle + axis)
+        if 'rotation' in nbt:
+            rot = nbt['rotation']
+            if isinstance(rot, dict):
+                racket.orientation_angle = float(rot.get('angle', 0))
+                axis = rot.get('axis', [0, 1, 0])
+                racket.orientation_axis = np.array(axis, dtype=float)
 
         return racket
 

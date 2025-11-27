@@ -2,109 +2,110 @@
 
 ## Project Status: Active Development
 
-**Date:** 2025-11-25
+**Date:** 2025-11-27
 **Repository:** https://github.com/imuzen127/PhysicsTableTennis
 
 ---
 
 ## Latest Additions
 
-### 1. Interactive 3D Game (`game.py`) - MAIN
+### 1. Y-up Coordinate System Unification (NEW!)
 
-Minecraft-style immersive experience where you ARE inside the game world.
+座標系を統一しました。全システムでY-up（XZ平面が水平、Yが高さ）を使用。
 
-**Features:**
-- First-person camera with WASD movement
-- Mouse always controls view (FPS-style)
-- Real-time ball physics visualization
-- In-game command console (press /)
-- F3 debug screen with coordinates & rotation
-- Ball trajectory trail effect
-- Bounce markers on table
-- Slow motion mode
-- ESC menu with Resume/Quit buttons
+**座標系:**
+| 軸 | 意味 |
+|----|------|
+| X | 水平（テーブル長さ方向） |
+| Y | 高さ（上方向） |
+| Z | 水平（テーブル幅方向） |
 
-**Run:** `python game.py`
+**コマンド例:**
+```
+ball -1 1 0           # x=-1, height=1, z=0
+launch 12 3 0         # vx=12, vy(上)=3, vz=0
+summon ball ~ ~1 ~    # プレイヤー位置の1m上
+```
+
+---
+
+### 2. Ball Orientation Display - F3+B (NEW!)
+
+ボールの向き（回転状態）を可視化する機能。
+
+**使用方法:**
+1. `F3`キーを押しながら`B`キーを押してトグル
+2. 黄色→赤のグラデーション線がボールの向きを表示
+3. 再度F3+Bで非表示
+
+**コマンド例:**
+```
+summon ball ~ ~1 ~ {rotation:{angle:1.570, axis:[1,0,0]}}
+```
+- X軸周りに90度（π/2ラジアン）回転したボールを召喚
+- デフォルトの正面方向は+Z方向
+
+---
+
+### 3. Minecraft-Style Command System
+
+Full NBT data support with Minecraft-like syntax.
+
+**NBT Parameters:**
+| Parameter | Description | Default | Unit |
+|-----------|-------------|---------|------|
+| velocity | Velocity | 0 | m/s |
+| acceleration | Acceleration | 0 | m/s^2 |
+| mass | Mass | 2.7 (ball), 180 (racket) | g |
+| radius | Radius | 20 | mm |
+| coefficient | Friction | [0.8, 0.8] | [red, black] |
+| rotation | Orientation | {angle:0, axis:[0,1,0]} | rad |
+| spin | Spin | {rpm:0, axis:[0,1,0]} | RPM |
+
+**Coordinate Systems:**
+- `~ ~ ~` - Relative to player position (default if omitted)
+- `^ ^ ^` - Local coordinates (based on player facing direction)
+
+**Commands:**
+```
+summon ball                         - Spawn ball at player position
+summon ball ~ ~1 ~                  - Spawn ball 1m above player
+summon ball {velocity:{rotation:@s, speed:15}}  - With velocity
+summon ball {rotation:{angle:1.57, axis:[1,0,0]}} - With orientation
+summon racket {mass:180, coefficient:[0.9,0.8]}
+
+execute rotate as @s run summon ball ^0 ^0 ^2
+execute at @n[type=ball] run summon ball ~ ~1 ~
+
+start                               - Start simulation
+stop                                - Stop simulation
+kill @e                             - Remove all entities
+kill @e[type=ball]                  - Remove all balls
+
+gamemode gravity 9.8                - Change gravity
+```
+
+---
+
+### 4. Interactive 3D Game (`game.py`) - MAIN
+
+Minecraft-style immersive experience.
 
 **Controls:**
 | Key | Action |
 |-----|--------|
 | WASD | Move around |
-| Mouse | Look around (always active) |
-| Mouse Side 2 | Up (ascend) |
-| Mouse Side 1 | Down (descend) |
-| / (slash) | Open command console |
-| ESC | Toggle menu / Close chat |
+| Mouse | Look around |
+| Mouse Button 6 | Up (ascend) |
+| Mouse Button 7 | Down (descend) |
+| Mouse Button 4 | Accelerate |
+| Mouse Button 5 | Decelerate |
+| / | Open command console |
+| Arrow Keys | Move cursor in command |
+| ESC | Menu |
 | F1 | Toggle help |
-| F3 | Toggle debug screen |
-
-**F3 Debug Screen (Minecraft-style):**
-```
-Table Tennis Physics Simulation
-
-XYZ: -3.000 / 2.000 / 1.500
-Facing: South (-Y)
-Rotation: -30.0 / 15.0
-
-FPS: 60
-Time Scale: 1.0x
-
-Ball XYZ: 0.000 / 0.000 / 1.000
-Ball Vel: 10.00 / 0.00 / 3.00
-Ball Speed: 10.44 m/s
-Ball Spin: 3000 RPM
-```
-
-**In-Game Commands (press / to open):**
-```
-ball 0 0 1          - Place ball at position
-launch 10 0 3       - Launch ball with velocity
-spin top 3000       - Set topspin at 3000 RPM
-spin back 2500      - Set backspin
-serve 15            - Serve at 15 m/s
-slow 0.2            - Slow motion (0.2x speed)
-tp ball             - Teleport to ball
-reset               - Reset simulation
-```
-
-**Quick Demo Commands:** `topspin`, `backspin`, `smash`
-
----
-
-### 2. Console Interface (`console.py`)
-
-Text-based interactive command interface for detailed simulation control.
-
-**Run:** `python console.py`
-
----
-
-### 3. Simple Runner (`main.py`)
-
-Command-line interface for quick simulations.
-
-**Run:** `python main.py --help`
-
----
-
-## Physics Engine Features
-
-### Ball Physics
-- Accurate Magnus effect (lift coefficient: Cl = 1/(2 + 1/S))
-- Air drag with proper coefficient (Cd = 0.45)
-- Exponential spin decay
-- ITTF standard ball (2.7g, 40mm)
-
-### Racket Physics
-- Multiple rubber types (inverted, pimples, anti-spin)
-- Rubber-specific friction and spin coefficients
-- Blade stiffness modeling
-- Forehand/backhand rubber distinction
-
-### Equipment Presets
-- Offensive setup (fast blade, high-spin rubbers)
-- Defensive setup (soft blade, long pimples)
-- All-round setup (balanced)
+| F3 | Debug screen |
+| F3+B | Ball orientation display |
 
 ---
 
@@ -113,37 +114,19 @@ Command-line interface for quick simulations.
 ```
 PhysicsTableTennis/
 ├── game.py              # Interactive 3D game (MAIN)
-├── console.py           # Command-line interface
-├── main.py              # Simple runner
-├── interactive.py       # OpenGL viewer (legacy)
 ├── src/
+│   ├── command/         # Command system
+│   │   ├── parser.py    # NBT & coordinate parser
+│   │   └── objects.py   # Entity management
 │   ├── physics/
-│   │   ├── parameters.py   # Physics parameters
-│   │   ├── ball.py         # Ball dynamics + Magnus
-│   │   ├── racket.py       # Racket + rubber physics
-│   │   ├── table.py        # Table collision
-│   │   └── collision.py    # Collision handler
-│   ├── simulation/
-│   │   └── engine.py       # Main simulation engine
-│   └── visualization/
-│       └── viewer.py       # Matplotlib 3D viewer
-└── examples/               # Example scripts
+│   │   ├── parameters.py
+│   │   ├── ball.py      # Y-up coordinate system
+│   │   ├── table.py     # Y-up coordinate system
+│   │   ├── racket.py    # Y-up coordinate system
+│   │   └── collision.py # Y-up coordinate system
+│   └── simulation/
+│       └── engine.py
 ```
-
----
-
-## Git Commits (Latest First)
-
-| Commit | Description |
-|--------|-------------|
-| 1d40c87 | Add F3 debug screen with coordinates and rotation |
-| 63bf5ea | Fix mouse controls: invert look, detect side buttons |
-| 0405030 | Fix flicker and update controls |
-| f84a6de | Add immersive 3D game with in-game commands |
-| 44085e4 | Add console.py command interface |
-| f219e9d | Add interactive.py OpenGL viewer |
-| 2c31b71 | Add main.py entry point |
-| 865fd1d | Enhance physics engine with Magnus effect |
 
 ---
 
@@ -155,21 +138,12 @@ pip install numpy matplotlib pygame PyOpenGL
 python game.py
 ```
 
-Press `/` and type `serve` or `topspin`
+Press `/` and type:
+- `summon ball` - Spawn ball
+- `start` - Begin simulation
+- `gamemode gravity 1.62` - Moon gravity!
+- Press `F3+B` to see ball orientation
 
 ---
 
-## Requirements
-
-```
-numpy
-matplotlib
-pygame
-PyOpenGL
-```
-
-Install: `pip install numpy matplotlib pygame PyOpenGL`
-
----
-
-*Report updated: 2025-11-25*
+*Report updated: 2025-11-27*

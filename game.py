@@ -30,7 +30,7 @@ from src.physics.ball import Ball
 from src.physics.table import Table
 from src.physics.racket import Racket
 from src.physics.collision import CollisionHandler
-from src.command.parser import CommandParser, yup_to_zup, zup_to_yup
+from src.command.parser import CommandParser
 from src.command.objects import EntityManager, BallEntity, RacketEntity
 
 
@@ -77,8 +77,8 @@ class GameWorld:
         self.max_trail = 150
         self.bounce_markers = []
 
-        # Camera - player viewpoint
-        self.camera_pos = np.array([-3.0, 2.0, 1.5])
+        # Camera - player viewpoint (Y-up coordinate system)
+        self.camera_pos = np.array([-3.0, 1.5, 2.0])  # [x, height, z]
         self.camera_yaw = -30.0
         self.camera_pitch = 15.0
         self.camera_speed = 0.08
@@ -103,6 +103,7 @@ class GameWorld:
         self.paused = False
         self.show_help = True
         self.show_debug = False  # F3 debug screen
+        self.show_ball_orientation = False  # F3+B: show ball orientation line
         self.time_scale = 1.0
 
         # Stats
@@ -162,33 +163,34 @@ class GameWorld:
         glMatrixMode(GL_MODELVIEW)
 
     def _update_camera(self):
-        """First-person camera"""
+        """First-person camera (Y-up coordinate system)"""
         glLoadIdentity()
 
         yaw_rad = math.radians(self.camera_yaw)
         pitch_rad = math.radians(self.camera_pitch)
 
+        # Y-up: look direction in XZ plane, pitch affects Y
         look_x = self.camera_pos[0] + math.cos(pitch_rad) * math.cos(yaw_rad)
-        look_y = self.camera_pos[1] + math.cos(pitch_rad) * math.sin(yaw_rad)
-        look_z = self.camera_pos[2] + math.sin(pitch_rad)
+        look_y = self.camera_pos[1] + math.sin(pitch_rad)
+        look_z = self.camera_pos[2] + math.cos(pitch_rad) * math.sin(yaw_rad)
 
         gluLookAt(
             self.camera_pos[0], self.camera_pos[1], self.camera_pos[2],
             look_x, look_y, look_z,
-            0, 0, 1
+            0, 1, 0  # Y is up
         )
 
     def _draw_ground(self):
-        """Draw the floor"""
+        """Draw the floor (Y-up: ground is XZ plane at y=0)"""
         glDisable(GL_LIGHTING)
 
         # Main floor
         glColor4f(0.3, 0.4, 0.3, 1.0)
         glBegin(GL_QUADS)
-        glVertex3f(-10, -10, 0)
-        glVertex3f(10, -10, 0)
-        glVertex3f(10, 10, 0)
-        glVertex3f(-10, 10, 0)
+        glVertex3f(-10, 0, -10)
+        glVertex3f(10, 0, -10)
+        glVertex3f(10, 0, 10)
+        glVertex3f(-10, 0, 10)
         glEnd()
 
         # Grid
@@ -196,58 +198,58 @@ class GameWorld:
         glLineWidth(1.0)
         glBegin(GL_LINES)
         for i in range(-10, 11):
-            glVertex3f(i, -10, 0.002)
-            glVertex3f(i, 10, 0.002)
-            glVertex3f(-10, i, 0.002)
-            glVertex3f(10, i, 0.002)
+            glVertex3f(i, 0.002, -10)
+            glVertex3f(i, 0.002, 10)
+            glVertex3f(-10, 0.002, i)
+            glVertex3f(10, 0.002, i)
         glEnd()
 
         glEnable(GL_LIGHTING)
 
     def _draw_table(self):
-        """Draw table tennis table"""
-        hl = self.params.table_length / 2
-        hw = self.params.table_width / 2
-        h = self.params.table_height
+        """Draw table tennis table (Y-up coordinate system)"""
+        hl = self.params.table_length / 2  # X direction
+        hw = self.params.table_width / 2   # Z direction
+        h = self.params.table_height       # Y direction (height)
         th = 0.03
 
-        # Table top
+        # Table top (XZ plane at height Y=h)
         glColor3f(0.0, 0.25, 0.5)
         glBegin(GL_QUADS)
-        glNormal3f(0, 0, 1)
-        glVertex3f(-hl, -hw, h)
-        glVertex3f(hl, -hw, h)
-        glVertex3f(hl, hw, h)
-        glVertex3f(-hl, hw, h)
+        glNormal3f(0, 1, 0)  # Up
+        glVertex3f(-hl, h, -hw)
+        glVertex3f(hl, h, -hw)
+        glVertex3f(hl, h, hw)
+        glVertex3f(-hl, h, hw)
         glEnd()
 
         # Table sides
         glColor3f(0.0, 0.2, 0.4)
         glBegin(GL_QUADS)
-        # Front
-        glNormal3f(0, -1, 0)
-        glVertex3f(-hl, -hw, h - th)
-        glVertex3f(hl, -hw, h - th)
-        glVertex3f(hl, -hw, h)
-        glVertex3f(-hl, -hw, h)
-        # Back
-        glNormal3f(0, 1, 0)
-        glVertex3f(-hl, hw, h - th)
-        glVertex3f(hl, hw, h - th)
-        glVertex3f(hl, hw, h)
-        glVertex3f(-hl, hw, h)
-        # Left
+        # Front (negative Z)
+        glNormal3f(0, 0, -1)
+        glVertex3f(-hl, h - th, -hw)
+        glVertex3f(hl, h - th, -hw)
+        glVertex3f(hl, h, -hw)
+        glVertex3f(-hl, h, -hw)
+        # Back (positive Z)
+        glNormal3f(0, 0, 1)
+        glVertex3f(-hl, h - th, hw)
+        glVertex3f(hl, h - th, hw)
+        glVertex3f(hl, h, hw)
+        glVertex3f(-hl, h, hw)
+        # Left (negative X)
         glNormal3f(-1, 0, 0)
-        glVertex3f(-hl, -hw, h - th)
-        glVertex3f(-hl, hw, h - th)
-        glVertex3f(-hl, hw, h)
-        glVertex3f(-hl, -hw, h)
-        # Right
+        glVertex3f(-hl, h - th, -hw)
+        glVertex3f(-hl, h - th, hw)
+        glVertex3f(-hl, h, hw)
+        glVertex3f(-hl, h, -hw)
+        # Right (positive X)
         glNormal3f(1, 0, 0)
-        glVertex3f(hl, -hw, h - th)
-        glVertex3f(hl, hw, h - th)
-        glVertex3f(hl, hw, h)
-        glVertex3f(hl, -hw, h)
+        glVertex3f(hl, h - th, -hw)
+        glVertex3f(hl, h - th, hw)
+        glVertex3f(hl, h, hw)
+        glVertex3f(hl, h, -hw)
         glEnd()
 
         # White lines
@@ -255,53 +257,53 @@ class GameWorld:
         glColor3f(1.0, 1.0, 1.0)
         glLineWidth(3.0)
         glBegin(GL_LINE_LOOP)
-        glVertex3f(-hl + 0.02, -hw + 0.02, h + 0.002)
-        glVertex3f(hl - 0.02, -hw + 0.02, h + 0.002)
-        glVertex3f(hl - 0.02, hw - 0.02, h + 0.002)
-        glVertex3f(-hl + 0.02, hw - 0.02, h + 0.002)
+        glVertex3f(-hl + 0.02, h + 0.002, -hw + 0.02)
+        glVertex3f(hl - 0.02, h + 0.002, -hw + 0.02)
+        glVertex3f(hl - 0.02, h + 0.002, hw - 0.02)
+        glVertex3f(-hl + 0.02, h + 0.002, hw - 0.02)
         glEnd()
         glBegin(GL_LINES)
-        glVertex3f(0, -hw, h + 0.002)
-        glVertex3f(0, hw, h + 0.002)
-        glVertex3f(-hl, 0, h + 0.002)
-        glVertex3f(hl, 0, h + 0.002)
+        glVertex3f(0, h + 0.002, -hw)
+        glVertex3f(0, h + 0.002, hw)
+        glVertex3f(-hl, h + 0.002, 0)
+        glVertex3f(hl, h + 0.002, 0)
         glEnd()
         glEnable(GL_LIGHTING)
 
-        # Net
+        # Net (YZ plane at X=0)
         nh = self.params.table.net_height
         glColor4f(0.95, 0.95, 0.95, 0.9)
         glBegin(GL_QUADS)
-        glVertex3f(0, -hw - 0.15, h)
-        glVertex3f(0, hw + 0.15, h)
-        glVertex3f(0, hw + 0.15, h + nh)
-        glVertex3f(0, -hw - 0.15, h + nh)
+        glVertex3f(0, h, -hw - 0.15)
+        glVertex3f(0, h, hw + 0.15)
+        glVertex3f(0, h + nh, hw + 0.15)
+        glVertex3f(0, h + nh, -hw - 0.15)
         glEnd()
 
         # Net posts
         glColor3f(0.2, 0.2, 0.2)
-        self._draw_cylinder(0, -hw - 0.15, h, 0.015, nh)
-        self._draw_cylinder(0, hw + 0.15, h, 0.015, nh)
+        self._draw_cylinder_yup(0, h, -hw - 0.15, 0.015, nh)
+        self._draw_cylinder_yup(0, h, hw + 0.15, 0.015, nh)
 
         # Table legs
         glColor3f(0.25, 0.25, 0.25)
-        for lx, ly in [(-hl + 0.15, -hw + 0.1), (-hl + 0.15, hw - 0.1),
+        for lx, lz in [(-hl + 0.15, -hw + 0.1), (-hl + 0.15, hw - 0.1),
                        (hl - 0.15, -hw + 0.1), (hl - 0.15, hw - 0.1)]:
-            self._draw_cylinder(lx, ly, 0, 0.025, h - th)
+            self._draw_cylinder_yup(lx, 0, lz, 0.025, h - th)
 
-    def _draw_cylinder(self, x, y, z, radius, height, segments=12):
-        """Draw cylinder"""
+    def _draw_cylinder_yup(self, x, y, z, radius, height, segments=12):
+        """Draw cylinder (Y-up: cylinder extends in Y direction)"""
         glBegin(GL_QUAD_STRIP)
         for i in range(segments + 1):
             angle = 2 * math.pi * i / segments
-            nx, ny = math.cos(angle), math.sin(angle)
-            glNormal3f(nx, ny, 0)
-            glVertex3f(x + radius * nx, y + radius * ny, z)
-            glVertex3f(x + radius * nx, y + radius * ny, z + height)
+            nx, nz = math.cos(angle), math.sin(angle)
+            glNormal3f(nx, 0, nz)
+            glVertex3f(x + radius * nx, y, z + radius * nz)
+            glVertex3f(x + radius * nx, y + height, z + radius * nz)
         glEnd()
 
     def _draw_ball(self):
-        """Draw ball with trail"""
+        """Draw ball with trail (Y-up coordinate system)"""
         if not self.ball_active:
             # Ghost ball
             glColor4f(1.0, 0.6, 0.0, 0.3)
@@ -325,16 +327,16 @@ class GameWorld:
             glEnd()
             glEnable(GL_LIGHTING)
 
-        # Bounce markers
+        # Bounce markers (on XZ plane, Y is height)
         glDisable(GL_LIGHTING)
         for marker in self.bounce_markers[-5:]:
             glColor4f(0.0, 1.0, 0.0, 0.5)
             glPushMatrix()
-            glTranslatef(marker[0], marker[1], marker[2] + 0.003)
+            glTranslatef(marker[0], marker[1] + 0.003, marker[2])
             glBegin(GL_LINE_LOOP)
             for i in range(16):
                 angle = 2 * math.pi * i / 16
-                glVertex3f(0.05 * math.cos(angle), 0.05 * math.sin(angle), 0)
+                glVertex3f(0.05 * math.cos(angle), 0, 0.05 * math.sin(angle))
             glEnd()
             glPopMatrix()
         glEnable(GL_LIGHTING)
@@ -349,15 +351,15 @@ class GameWorld:
         glPopMatrix()
 
     def _draw_racket(self):
-        """Draw racket"""
+        """Draw racket (Y-up coordinate system)"""
         pos = self.racket.position
         glPushMatrix()
         glTranslatef(*pos)
 
-        # Handle
+        # Handle (extends downward in -Y direction)
         glColor3f(0.6, 0.4, 0.2)
         glPushMatrix()
-        glRotatef(90, 1, 0, 0)
+        glRotatef(-90, 1, 0, 0)  # Rotate to point down
         quadric = gluNewQuadric()
         gluCylinder(quadric, 0.015, 0.012, 0.15, 8, 1)
         gluDeleteQuadric(quadric)
@@ -366,7 +368,7 @@ class GameWorld:
         # Blade
         glColor3f(0.8, 0.1, 0.1)
         glPushMatrix()
-        glScalef(0.085, 0.08, 0.008)
+        glScalef(0.085, 0.008, 0.08)  # XYZ: width, thickness, depth
         quadric = gluNewQuadric()
         gluSphere(quadric, 1.0, 16, 8)
         gluDeleteQuadric(quadric)
@@ -399,10 +401,10 @@ class GameWorld:
         if self.collision.handle_ball_net_collision(self.ball, self.table):
             self.add_output("Net!")
 
-        if self.ball.position[2] < 0:
+        if self.ball.position[1] < 0:
             self.add_output(f"Landed! Time: {self.flight_time:.2f}s")
             self.ball_active = False
-        elif np.linalg.norm(self.ball.position[:2]) > 8:
+        elif np.linalg.norm(self.ball.position[[0, 2]]) > 8:
             self.add_output("Out of bounds!")
             self.ball_active = False
 
@@ -411,15 +413,16 @@ class GameWorld:
             self.entity_manager.update(dt, self.params)
 
     def handle_movement(self):
-        """Handle player movement"""
+        """Handle player movement (Y-up coordinate system)"""
         if self.console_open or self.menu_open:
             return
 
         keys = pygame.key.get_pressed()
 
         yaw_rad = math.radians(self.camera_yaw)
-        forward = np.array([math.cos(yaw_rad), math.sin(yaw_rad), 0])
-        right = np.array([math.sin(yaw_rad), -math.cos(yaw_rad), 0])
+        # Y-up: forward is in XZ plane
+        forward = np.array([math.cos(yaw_rad), 0, math.sin(yaw_rad)])
+        right = np.array([math.sin(yaw_rad), 0, -math.cos(yaw_rad)])
 
         # WASD movement
         if keys[K_w]:
@@ -431,14 +434,14 @@ class GameWorld:
         if keys[K_d]:
             self.camera_pos += right * self.camera_speed
 
-        # Mouse side buttons for up/down
+        # Mouse side buttons for up/down (Y is height)
         if self.mouse_side2_held:  # Side button 2 = up
-            self.camera_pos[2] += self.camera_speed
+            self.camera_pos[1] += self.camera_speed
         if self.mouse_side1_held:  # Side button 1 = down
-            self.camera_pos[2] -= self.camera_speed
+            self.camera_pos[1] -= self.camera_speed
 
         # Keep above ground
-        self.camera_pos[2] = max(0.3, self.camera_pos[2])
+        self.camera_pos[1] = max(0.3, self.camera_pos[1])
 
         # Mouse look (always active when not in menu/console)
         rel = pygame.mouse.get_rel()
@@ -459,7 +462,7 @@ class GameWorld:
 
         try:
             # New Minecraft-style commands (case-sensitive for NBT)
-            if command in ['summon', 'execute', 'kill']:
+            if command in ['summon', 'execute', 'kill', 'gamemode']:
                 result = self.command_parser.parse(cmd_original)
                 self._handle_parsed_command(result)
                 return
@@ -506,14 +509,15 @@ class GameWorld:
                     spin_type = args[0]
                     rpm = float(args[1]) if len(args) > 1 else 3000
                     spin_rad = rpm * 2 * math.pi / 60
+                    # Y-up: spin axis for topspin/backspin is Z, for sidespin is Y
                     if spin_type in ['top', 'topspin', 't']:
-                        self.ball.spin = np.array([0, spin_rad, 0])
+                        self.ball.spin = np.array([0, 0, spin_rad])
                         self.add_output(f"Topspin {rpm:.0f} RPM")
                     elif spin_type in ['back', 'backspin', 'b']:
-                        self.ball.spin = np.array([0, -spin_rad, 0])
+                        self.ball.spin = np.array([0, 0, -spin_rad])
                         self.add_output(f"Backspin {rpm:.0f} RPM")
                     elif spin_type in ['side', 'sidespin', 's']:
-                        self.ball.spin = np.array([0, 0, spin_rad])
+                        self.ball.spin = np.array([0, spin_rad, 0])
                         self.add_output(f"Sidespin {rpm:.0f} RPM")
                     elif spin_type in ['none', 'no', '0']:
                         self.ball.spin = np.array([0, 0, 0])
@@ -523,11 +527,13 @@ class GameWorld:
 
             elif command in ['serve', 'sv']:
                 power = float(args[0]) if args else 12
-                self.ball.reset(position=np.array([-1.2, 0.0, 0.9]))
+                # Y-up: position is [x, height, z]
+                self.ball.reset(position=np.array([-1.2, 0.9, 0.0]))
                 angle_rad = math.radians(10)
-                vel = np.array([power * math.cos(angle_rad), 0, power * 0.15 + 1])
+                # Y-up: velocity is [vx, vy (up), vz]
+                vel = np.array([power * math.cos(angle_rad), power * 0.15 + 1, 0])
                 self.ball.velocity = vel
-                self.ball.spin = np.array([0, 200, 0])
+                self.ball.spin = np.array([0, 0, 200])  # Topspin on Z axis
                 self.ball_active = True
                 self.ball_trail = [self.ball.position.copy()]
                 self.bounce_markers = []
@@ -550,7 +556,8 @@ class GameWorld:
                 self.add_output("Paused" if self.paused else "Resumed")
 
             elif command in ['reset', 'r']:
-                self.ball.reset(position=np.array([0, 0, 1]))
+                # Y-up: [x, height, z]
+                self.ball.reset(position=np.array([0, 1, 0]))
                 self.ball_active = False
                 self.ball_trail = []
                 self.bounce_markers = []
@@ -564,9 +571,11 @@ class GameWorld:
                     self.camera_pos = np.array([float(args[0]), float(args[1]), float(args[2])])
                     self.add_output(f"TP to ({args[0]}, {args[1]}, {args[2]})")
                 elif args and args[0] == 'ball':
-                    self.camera_pos = self.ball.position.copy() + np.array([-1, 0, 0.5])
+                    # Y-up: offset is [x, height, z]
+                    self.camera_pos = self.ball.position.copy() + np.array([-1, 0.5, 0])
                     self.add_output("TP to ball")
                 elif args and args[0] == 'table':
+                    # Y-up: [x, height, z]
                     self.camera_pos = np.array([-2.5, 1.5, 1.5])
                     self.add_output("TP to table view")
 
@@ -578,19 +587,22 @@ class GameWorld:
                 self.console_output = []
 
             elif command == 'topspin':
-                self.process_command("ball -1 0 1")
+                # Y-up: ball x height z, launch vx vy vz
+                self.process_command("ball -1 1 0")
                 self.process_command("spin top 4000")
-                self.process_command("launch 12 0 3")
+                self.process_command("launch 12 3 0")
 
             elif command == 'backspin':
-                self.process_command("ball 1 0 1.2")
+                # Y-up: ball x height z, launch vx vy vz
+                self.process_command("ball 1 1.2 0")
                 self.process_command("spin back 3500")
-                self.process_command("launch -8 0 4")
+                self.process_command("launch -8 4 0")
 
             elif command == 'smash':
-                self.process_command("ball -1 0 1.5")
+                # Y-up: ball x height z, launch vx vy vz
+                self.process_command("ball -1 1.5 0")
                 self.process_command("spin top 2000")
-                self.process_command("launch 20 0 -2")
+                self.process_command("launch 20 -2 0")
 
             else:
                 self.add_output(f"Unknown: {command}")
@@ -620,6 +632,20 @@ class GameWorld:
         elif cmd_type == 'start':
             self.entity_manager.start()
             self.add_output("Started simulation")
+
+        elif cmd_type == 'stop':
+            self.entity_manager.stop()
+            self.add_output("Stopped simulation")
+
+        elif cmd_type == 'gamemode':
+            args = result['args']
+            setting = args['setting']
+            value = args['value']
+            if setting == 'gravity':
+                self.params.gravity = value
+                self.add_output(f"Gravity set to {value}")
+            else:
+                self.add_output(f"Unknown setting: {setting}")
 
         elif cmd_type == 'error':
             self.add_output(result.get('message', 'Error'))
@@ -709,6 +735,13 @@ class GameWorld:
                         self.show_help = not self.show_help
                     elif event.key == K_F3:
                         self.show_debug = not self.show_debug
+                    elif event.key == K_b:
+                        # F3+B: Toggle ball orientation display
+                        keys = pygame.key.get_pressed()
+                        if keys[K_F3]:
+                            self.show_ball_orientation = not self.show_ball_orientation
+                            state = "ON" if self.show_ball_orientation else "OFF"
+                            self.add_output(f"Ball orientation: {state}")
 
             elif event.type == MOUSEBUTTONDOWN:
                 if self.menu_open:
@@ -796,7 +829,7 @@ class GameWorld:
             lines = [
                 f"Speed: {speed:.1f} m/s",
                 f"Spin: {rpm:.0f} RPM",
-                f"Height: {pos[2]:.2f} m",
+                f"Height: {pos[1]:.2f} m",  # Y is height in Y-up
                 f"Bounces: {self.bounces}"
             ]
             y = 15
@@ -817,15 +850,15 @@ class GameWorld:
             # Pitch is already -80 to 80
             pitch = self.camera_pitch
 
-            # Direction facing
+            # Direction facing (Y-up: XZ plane, Y is height)
             if -45 <= yaw < 45:
                 facing = "East (+X)"
             elif 45 <= yaw < 135:
-                facing = "North (+Y)"
+                facing = "North (+Z)"
             elif yaw >= 135 or yaw < -135:
                 facing = "West (-X)"
             else:
-                facing = "South (-Y)"
+                facing = "South (-Z)"
 
             # FPS
             fps = self.clock.get_fps()
@@ -872,7 +905,8 @@ class GameWorld:
                 "WASD - Move",
                 "Mouse Side 2/1 - Up/Down",
                 "/ - Commands    ESC - Menu",
-                "F1 - Help    F3 - Debug"
+                "F1 - Help    F3 - Debug",
+                "F3+B - Ball orientation"
             ]
             y = 15
             for line in help_lines:
@@ -928,12 +962,57 @@ class GameWorld:
 
         return hud
 
+    def _draw_ball_orientation(self, ball):
+        """Draw orientation line from ball center (F3+B feature)"""
+        pos = ball.position
+        angle = ball.orientation_angle
+        axis = ball.orientation_axis
+
+        # Default direction: positive Z (forward in Y-up)
+        default_dir = np.array([0.0, 0.0, 1.0])
+
+        # Apply rotation using Rodrigues' formula: v_rot = v*cos(θ) + (k×v)*sin(θ) + k*(k·v)*(1-cos(θ))
+        if abs(angle) > 1e-6:
+            k = axis
+            v = default_dir
+            cos_a = math.cos(angle)
+            sin_a = math.sin(angle)
+            k_cross_v = np.cross(k, v)
+            k_dot_v = np.dot(k, v)
+            direction = v * cos_a + k_cross_v * sin_a + k * k_dot_v * (1 - cos_a)
+        else:
+            direction = default_dir
+
+        # Line length (proportional to ball size, visible)
+        line_length = ball.radius * 3
+
+        # End point
+        end_pos = pos + direction * line_length
+
+        # Draw line
+        glDisable(GL_LIGHTING)
+        glLineWidth(2.0)
+        glBegin(GL_LINES)
+        glColor3f(1.0, 1.0, 0.0)  # Yellow
+        glVertex3f(*pos)
+        glColor3f(1.0, 0.0, 0.0)  # Red at tip
+        glVertex3f(*end_pos)
+        glEnd()
+
+        # Draw small arrowhead
+        glPointSize(6.0)
+        glBegin(GL_POINTS)
+        glColor3f(1.0, 0.0, 0.0)
+        glVertex3f(*end_pos)
+        glEnd()
+
+        glEnable(GL_LIGHTING)
+
     def _draw_entities(self):
-        """Draw all entities from entity manager"""
-        # Draw balls
+        """Draw all entities from entity manager (Y-up coordinate system)"""
+        # Draw balls (no coordinate conversion needed - all Y-up now)
         for ball in self.entity_manager.balls:
-            # Convert Y-up to Z-up for rendering
-            pos = yup_to_zup(ball.position)
+            pos = ball.position
 
             # Draw trail
             if len(ball.trail) > 1:
@@ -943,8 +1022,7 @@ class GameWorld:
                 for i, trail_pos in enumerate(ball.trail):
                     alpha = (i / len(ball.trail)) ** 0.5
                     glColor4f(0.0, 0.8, 1.0, alpha * 0.7)
-                    render_pos = yup_to_zup(trail_pos)
-                    glVertex3f(*render_pos)
+                    glVertex3f(*trail_pos)
                 glEnd()
                 glEnable(GL_LIGHTING)
 
@@ -960,16 +1038,20 @@ class GameWorld:
             gluDeleteQuadric(quadric)
             glPopMatrix()
 
+            # Draw orientation line (F3+B)
+            if self.show_ball_orientation:
+                self._draw_ball_orientation(ball)
+
         # Draw rackets
         for racket in self.entity_manager.rackets:
-            pos = yup_to_zup(racket.position)
+            pos = racket.position
             glPushMatrix()
             glTranslatef(*pos)
 
-            # Handle
+            # Handle (Y-up: extends downward in -Y direction)
             glColor3f(0.4, 0.3, 0.2)
             glPushMatrix()
-            glRotatef(90, 1, 0, 0)
+            glRotatef(-90, 1, 0, 0)  # Rotate to point down
             quadric = gluNewQuadric()
             gluCylinder(quadric, 0.015, 0.012, 0.15, 8, 1)
             gluDeleteQuadric(quadric)
@@ -984,7 +1066,7 @@ class GameWorld:
                 glColor3f(0.2, 0.2, 0.2)  # Black (anti)
 
             glPushMatrix()
-            glScalef(0.085, 0.08, 0.008)
+            glScalef(0.085, 0.008, 0.08)  # XYZ: width, thickness, depth
             quadric = gluNewQuadric()
             gluSphere(quadric, 1.0, 16, 8)
             gluDeleteQuadric(quadric)
