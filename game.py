@@ -104,6 +104,12 @@ class GameWorld:
         self.show_ball_orientation = False  # F3+B: show ball orientation line
         self.time_scale = 1.0
 
+        # Data popup state
+        self.data_popup_open = False
+        self.data_popup_content = []  # Lines of NBT data to display
+        self.data_popup_title = ""
+        self.data_popup_close_rect = (0, 0, 0, 0)  # (x, y, w, h) for click detection
+
         # Stats
         self.bounces = 0
         self.max_speed = 0
@@ -626,16 +632,14 @@ class GameWorld:
             path = args['path']
             nbt_data = self._get_entity_nbt(entity)
             if path:
-                # Get specific path
+                # Get specific path - show in console
                 if path in nbt_data:
                     self.add_output(f"{path}: {nbt_data[path]}")
                 else:
                     self.add_output(f"Unknown path: {path}")
             else:
-                # Show all NBT data
-                self.add_output(f"Entity [{entity.id}] NBT:")
-                for key, value in nbt_data.items():
-                    self.add_output(f"  {key}: {value}")
+                # Show all NBT data in popup
+                self._show_data_popup(entity, nbt_data)
 
         elif cmd_type == 'data_modify':
             args = result['args']
@@ -703,6 +707,25 @@ class GameWorld:
         if len(self.console_output) > self.max_output_lines:
             self.console_output.pop(0)
 
+    def _show_data_popup(self, entity, nbt_data: dict):
+        """Show data popup with entity NBT"""
+        self.data_popup_title = f"Entity Data [{entity.id}]"
+        self.data_popup_content = []
+
+        for key, value in nbt_data.items():
+            self.data_popup_content.append(f"{key}: {value}")
+
+        self.data_popup_open = True
+        # Show mouse cursor for popup interaction
+        pygame.mouse.set_visible(True)
+        pygame.event.set_grab(False)
+
+    def _close_data_popup(self):
+        """Close data popup and restore mouse state"""
+        self.data_popup_open = False
+        pygame.mouse.set_visible(False)
+        pygame.event.set_grab(True)
+
     def handle_events(self):
         """Handle events"""
         for event in pygame.event.get():
@@ -710,6 +733,12 @@ class GameWorld:
                 self.running = False
 
             elif event.type == KEYDOWN:
+                # Data popup takes priority
+                if self.data_popup_open:
+                    if event.key == K_ESCAPE or event.key == K_RETURN:
+                        self._close_data_popup()
+                    continue
+
                 if self.console_open:
                     # Chat input mode with cursor support
                     if event.key == K_RETURN:
@@ -787,6 +816,14 @@ class GameWorld:
                             self.add_output(f"Ball orientation: {state}")
 
             elif event.type == MOUSEBUTTONDOWN:
+                # Data popup close button
+                if self.data_popup_open:
+                    mx, my = event.pos
+                    bx, by, bw, bh = self.data_popup_close_rect
+                    if bx <= mx <= bx + bw and by <= my <= by + bh:
+                        self._close_data_popup()
+                    continue
+
                 if self.menu_open:
                     # Check menu button clicks
                     mx, my = event.pos
@@ -1002,6 +1039,71 @@ class GameWorld:
             pygame.draw.rect(hud, quit_color, (550, 420, 300, 50), border_radius=8)
             quit_text = self.font_medium.render("Quit", True, (255, 255, 255))
             hud.blit(quit_text, (self.width // 2 - quit_text.get_width() // 2, 430))
+
+        # Data popup
+        if self.data_popup_open:
+            # Calculate popup dimensions
+            popup_width = 500
+            line_height = 22
+            padding = 15
+            title_height = 35
+            close_btn_height = 35
+            content_height = len(self.data_popup_content) * line_height + padding * 2
+            popup_height = title_height + content_height + close_btn_height + padding
+
+            # Center popup
+            popup_x = (self.width - popup_width) // 2
+            popup_y = (self.height - popup_height) // 2
+
+            # Background with semi-transparent overlay
+            overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 120))
+            hud.blit(overlay, (0, 0))
+
+            # Popup background
+            popup_bg = pygame.Surface((popup_width, popup_height), pygame.SRCALPHA)
+            popup_bg.fill((30, 30, 40, 240))
+            hud.blit(popup_bg, (popup_x, popup_y))
+
+            # Border
+            pygame.draw.rect(hud, (100, 100, 120), (popup_x, popup_y, popup_width, popup_height), 2, border_radius=8)
+
+            # Title bar
+            pygame.draw.rect(hud, (50, 50, 70), (popup_x, popup_y, popup_width, title_height), border_radius=8)
+            pygame.draw.rect(hud, (50, 50, 70), (popup_x, popup_y + 10, popup_width, title_height - 10))
+            title_text = self.font_medium.render(self.data_popup_title or "Entity Data", True, (255, 255, 255))
+            hud.blit(title_text, (popup_x + padding, popup_y + 8))
+
+            # Content
+            y = popup_y + title_height + padding
+            for line in self.data_popup_content:
+                # Syntax highlighting for NBT
+                if ":" in line and not line.strip().startswith("{"):
+                    parts = line.split(":", 1)
+                    key_text = self.font_small.render(parts[0] + ":", True, (150, 200, 255))
+                    hud.blit(key_text, (popup_x + padding, y))
+                    if len(parts) > 1:
+                        value_text = self.font_small.render(parts[1], True, (255, 220, 150))
+                        hud.blit(value_text, (popup_x + padding + key_text.get_width(), y))
+                else:
+                    text = self.font_small.render(line, True, (220, 220, 220))
+                    hud.blit(text, (popup_x + padding, y))
+                y += line_height
+
+            # Close button
+            mx, my = pygame.mouse.get_pos()
+            close_btn_y = popup_y + popup_height - close_btn_height - padding // 2
+            close_btn_x = popup_x + popup_width // 2 - 60
+            close_btn_w, close_btn_h = 120, 30
+
+            # Store button rect for click detection
+            self.data_popup_close_rect = (close_btn_x, close_btn_y, close_btn_w, close_btn_h)
+
+            btn_hover = close_btn_x <= mx <= close_btn_x + close_btn_w and close_btn_y <= my <= close_btn_y + close_btn_h
+            btn_color = (100, 150, 200) if btn_hover else (70, 100, 140)
+            pygame.draw.rect(hud, btn_color, (close_btn_x, close_btn_y, close_btn_w, close_btn_h), border_radius=5)
+            close_text = self.font_small.render("Close [ESC]", True, (255, 255, 255))
+            hud.blit(close_text, (close_btn_x + (close_btn_w - close_text.get_width()) // 2, close_btn_y + 6))
 
         return hud
 
