@@ -652,11 +652,57 @@ class GameWorld:
             else:
                 self.add_output(f"Failed to set {path}")
 
+        elif cmd_type == 'function':
+            func_name = result['args']['name']
+            self._run_function(func_name)
+
         elif cmd_type == 'error':
             self.add_output(result.get('message', 'Error'))
 
         elif cmd_type == 'unknown':
             self.add_output(f"Unknown command: {result.get('raw', '')}")
+
+    def _run_function(self, func_name: str):
+        """Run a function file from the functions folder"""
+        import os
+
+        # Try to find the function file
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        func_path = os.path.join(base_path, 'functions', f'{func_name}.mcfunction')
+
+        if not os.path.exists(func_path):
+            # Try without .mcfunction extension (maybe they included it)
+            alt_path = os.path.join(base_path, 'functions', func_name)
+            if os.path.exists(alt_path):
+                func_path = alt_path
+            else:
+                self.add_output(f"Function not found: {func_name}")
+                return
+
+        try:
+            with open(func_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+
+            cmd_count = 0
+            for line in lines:
+                line = line.strip()
+
+                # Skip empty lines and comments
+                if not line or line.startswith('#'):
+                    continue
+
+                # Remove leading / if present
+                if line.startswith('/'):
+                    line = line[1:]
+
+                # Execute the command
+                self.process_command(line)
+                cmd_count += 1
+
+            self.add_output(f"Executed {func_name} ({cmd_count} commands)")
+
+        except Exception as e:
+            self.add_output(f"Error running function: {e}")
 
     def _get_entity_nbt(self, entity) -> dict:
         """Get NBT data from entity"""
@@ -1158,27 +1204,35 @@ class GameWorld:
         glEnable(GL_LIGHTING)
 
     def _draw_racket_entity(self, racket):
-        """Draw racket with rubber visualization and orientation line"""
+        """Draw racket with rubber visualization and orientation line
+
+        Default orientation (angle=0): Red side faces UP (+Y direction)
+        Blade lies in XZ plane, handle points in -Z direction
+        """
         from src.command.objects import RubberType
 
         pos = racket.position
         glPushMatrix()
         glTranslatef(*pos)
 
-        # Apply angle-axis rotation
+        # Apply angle-axis rotation from NBT
         angle_deg = math.degrees(racket.orientation_angle)
         if abs(angle_deg) > 0.01:
             glRotatef(angle_deg, *racket.orientation_axis)
 
-        # Racket dimensions
+        # Default orientation: blade horizontal (XZ plane), red side up (+Y)
+        # Rotate blade 90 degrees around X axis so red side (+Y local) faces world +Y
+        glRotatef(-90, 1, 0, 0)
+
+        # Racket dimensions (now blade is in XY plane after rotation)
         blade_width = 0.15   # Width of blade (X)
-        blade_height = 0.16  # Height of blade (Y)
-        blade_thick = 0.006  # Thickness of blade core (Z)
+        blade_height = 0.16  # Height of blade (Y, but becomes Z after rotation)
+        blade_thick = 0.006  # Thickness of blade core (was Z, becomes Y)
         rubber_thick = 0.002  # Rubber thickness
         handle_len = 0.10    # Handle length
         handle_radius = 0.012
 
-        # Draw blade core (wood)
+        # Draw blade core (wood) - ellipsoid in XY, thin in Z (which is now world Y direction)
         glColor3f(0.6, 0.45, 0.25)  # Wood color
         glPushMatrix()
         glScalef(blade_width / 2, blade_height / 2, blade_thick / 2)
@@ -1187,19 +1241,19 @@ class GameWorld:
         gluDeleteQuadric(quadric)
         glPopMatrix()
 
-        # Draw red side rubber (+Z side)
+        # Draw red side rubber (+Z side in local coords = +Y in world when flat)
         self._draw_rubber_surface(racket.rubber_red, blade_width, blade_height,
                                   blade_thick / 2 + rubber_thick / 2, rubber_thick, True)
 
-        # Draw black side rubber (-Z side)
+        # Draw black side rubber (-Z side in local coords = -Y in world when flat)
         self._draw_rubber_surface(racket.rubber_black, blade_width, blade_height,
                                   -(blade_thick / 2 + rubber_thick / 2), rubber_thick, False)
 
-        # Handle (attached to bottom edge of blade, extends down in -Y)
+        # Handle (attached to bottom edge of blade, extends in -Y local = -Z world when flat)
         glColor3f(0.5, 0.35, 0.2)
         glPushMatrix()
-        glTranslatef(0, -blade_height / 2, 0)  # Move to bottom of blade
-        glRotatef(90, 1, 0, 0)  # Rotate cylinder to point down (-Y)
+        glTranslatef(0, -blade_height / 2, 0)  # Move to bottom of blade (local -Y)
+        glRotatef(90, 1, 0, 0)  # Rotate cylinder to point in local -Y direction
         quadric = gluNewQuadric()
         gluCylinder(quadric, handle_radius, handle_radius * 0.9, handle_len, 8, 1)
         gluDeleteQuadric(quadric)
@@ -1324,13 +1378,17 @@ class GameWorld:
         gluDeleteQuadric(quadric)
 
     def _draw_racket_orientation(self, racket):
-        """Draw orientation line from racket center"""
+        """Draw orientation line from racket center (red side direction)
+
+        Default (angle=0): Red side faces UP (+Y)
+        The orientation line shows where the red side is facing.
+        """
         pos = racket.position
         angle = racket.orientation_angle
         axis = racket.orientation_axis
 
-        # Default direction: positive Z (forward, facing direction of racket)
-        default_dir = np.array([0.0, 0.0, 1.0])
+        # Default direction: positive Y (UP - red side faces up by default)
+        default_dir = np.array([0.0, 1.0, 0.0])
 
         # Apply rotation using Rodrigues' formula
         if abs(angle) > 1e-6:
@@ -1345,7 +1403,7 @@ class GameWorld:
             direction = default_dir
 
         # Line length (visible orientation indicator)
-        line_length = 0.25  # 25cm line
+        line_length = 0.20  # 20cm line
 
         # End point
         end_pos = pos + direction * line_length
@@ -1354,16 +1412,16 @@ class GameWorld:
         glDisable(GL_LIGHTING)
         glLineWidth(3.0)
         glBegin(GL_LINES)
-        glColor3f(0.0, 1.0, 0.5)  # Green-cyan for racket orientation
+        glColor3f(0.9, 0.2, 0.2)  # Red (matches red rubber side)
         glVertex3f(*pos)
-        glColor3f(1.0, 1.0, 0.0)  # Yellow at tip
+        glColor3f(1.0, 0.6, 0.0)  # Orange at tip
         glVertex3f(*end_pos)
         glEnd()
 
         # Draw arrowhead
         glPointSize(8.0)
         glBegin(GL_POINTS)
-        glColor3f(1.0, 1.0, 0.0)
+        glColor3f(1.0, 0.6, 0.0)
         glVertex3f(*end_pos)
         glEnd()
 

@@ -561,8 +561,27 @@ class CommandParser:
         if command.startswith('data '):
             return self._parse_data(command[5:])
 
+        # Handle function command
+        if command.startswith('function '):
+            return self._parse_function(command[9:])
+
         # Handle other commands
         return {'type': 'unknown', 'raw': command}
+
+    def _parse_function(self, rest: str) -> Dict[str, Any]:
+        """Parse function command: function <name>"""
+        func_name = rest.strip()
+
+        # Remove .mcfunction extension if present
+        if func_name.endswith('.mcfunction'):
+            func_name = func_name[:-11]
+
+        return {
+            'type': 'function',
+            'args': {
+                'name': func_name
+            }
+        }
 
     def _parse_execute(self, rest: str) -> Dict[str, Any]:
         """Parse execute subcommand"""
