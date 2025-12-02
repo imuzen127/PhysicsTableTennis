@@ -453,6 +453,43 @@ class CommandParser:
             return self.execute_rotation[1]
         return self.game.camera_pitch
 
+    def get_player_rotation_angle_axis(self) -> Tuple[float, np.ndarray]:
+        """
+        Get player rotation as angle-axis format.
+        Converts yaw/pitch to a combined rotation.
+        """
+        yaw = math.radians(self.get_player_yaw())
+        pitch = math.radians(self.get_player_pitch())
+
+        # Create rotation: first pitch around X, then yaw around Y
+        # For simplicity, we'll compute the forward direction and derive angle-axis
+        # Forward direction after rotation
+        forward = np.array([
+            math.cos(pitch) * math.cos(yaw),
+            math.sin(pitch),
+            math.cos(pitch) * math.sin(yaw)
+        ])
+
+        # Default forward is +Z
+        default_forward = np.array([0.0, 0.0, 1.0])
+
+        # Compute rotation axis and angle using cross product and dot product
+        dot = np.dot(default_forward, forward)
+        dot = np.clip(dot, -1.0, 1.0)  # Clamp for numerical stability
+
+        if dot > 0.9999:
+            # No rotation needed
+            return 0.0, np.array([0.0, 1.0, 0.0])
+        elif dot < -0.9999:
+            # 180 degree rotation
+            return math.pi, np.array([0.0, 1.0, 0.0])
+
+        angle = math.acos(dot)
+        axis = np.cross(default_forward, forward)
+        axis = axis / np.linalg.norm(axis)
+
+        return angle, axis
+
     def _find_nearest_entity(self, entity_type: str) -> Optional[np.ndarray]:
         """Find nearest entity of type and return its position"""
         entity = self._get_nearest_entity(entity_type)

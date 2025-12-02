@@ -356,21 +356,29 @@ class GameWorld:
         glPushMatrix()
         glTranslatef(*pos)
 
-        # Handle (extends downward in -Y direction)
-        glColor3f(0.6, 0.4, 0.2)
+        # Racket dimensions
+        blade_width = 0.15
+        blade_height = 0.16
+        blade_thick = 0.008
+        handle_len = 0.10
+        handle_radius = 0.012
+
+        # Blade (elliptical)
+        glColor3f(0.8, 0.1, 0.1)
         glPushMatrix()
-        glRotatef(-90, 1, 0, 0)  # Rotate to point down
+        glScalef(blade_width / 2, blade_height / 2, blade_thick / 2)
         quadric = gluNewQuadric()
-        gluCylinder(quadric, 0.015, 0.012, 0.15, 8, 1)
+        gluSphere(quadric, 1.0, 16, 12)
         gluDeleteQuadric(quadric)
         glPopMatrix()
 
-        # Blade
-        glColor3f(0.8, 0.1, 0.1)
+        # Handle (attached to bottom edge of blade)
+        glColor3f(0.5, 0.35, 0.2)
         glPushMatrix()
-        glScalef(0.085, 0.008, 0.08)  # XYZ: width, thickness, depth
+        glTranslatef(0, -blade_height / 2, 0)
+        glRotatef(90, 1, 0, 0)
         quadric = gluNewQuadric()
-        gluSphere(quadric, 1.0, 16, 8)
+        gluCylinder(quadric, handle_radius, handle_radius * 0.9, handle_len, 8, 1)
         gluDeleteQuadric(quadric)
         glPopMatrix()
 
@@ -1119,16 +1127,19 @@ class GameWorld:
             glPushMatrix()
             glTranslatef(*pos)
 
-            # Handle (Y-up: extends downward in -Y direction)
-            glColor3f(0.4, 0.3, 0.2)
-            glPushMatrix()
-            glRotatef(-90, 1, 0, 0)  # Rotate to point down
-            quadric = gluNewQuadric()
-            gluCylinder(quadric, 0.015, 0.012, 0.15, 8, 1)
-            gluDeleteQuadric(quadric)
-            glPopMatrix()
+            # Apply angle-axis rotation
+            angle_deg = math.degrees(racket.orientation_angle)
+            if abs(angle_deg) > 0.01:
+                glRotatef(angle_deg, *racket.orientation_axis)
 
-            # Blade - color based on rubber type
+            # Racket dimensions
+            blade_width = 0.15   # Width of blade (X)
+            blade_height = 0.16  # Height of blade (Y)
+            blade_thick = 0.008  # Thickness (Z)
+            handle_len = 0.10    # Handle length
+            handle_radius = 0.012
+
+            # Blade (elliptical, centered at origin)
             if racket.rubber.type == "inverted":
                 glColor3f(0.8, 0.1, 0.1)  # Red
             elif racket.rubber.type == "pimples":
@@ -1137,9 +1148,19 @@ class GameWorld:
                 glColor3f(0.2, 0.2, 0.2)  # Black (anti)
 
             glPushMatrix()
-            glScalef(0.085, 0.008, 0.08)  # XYZ: width, thickness, depth
+            glScalef(blade_width / 2, blade_height / 2, blade_thick / 2)
             quadric = gluNewQuadric()
-            gluSphere(quadric, 1.0, 16, 8)
+            gluSphere(quadric, 1.0, 16, 12)
+            gluDeleteQuadric(quadric)
+            glPopMatrix()
+
+            # Handle (attached to bottom edge of blade, extends down in -Y)
+            glColor3f(0.5, 0.35, 0.2)
+            glPushMatrix()
+            glTranslatef(0, -blade_height / 2, 0)  # Move to bottom of blade
+            glRotatef(90, 1, 0, 0)  # Rotate cylinder to point down (-Y)
+            quadric = gluNewQuadric()
+            gluCylinder(quadric, handle_radius, handle_radius * 0.9, handle_len, 8, 1)
             gluDeleteQuadric(quadric)
             glPopMatrix()
 
