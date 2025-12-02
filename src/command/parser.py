@@ -624,25 +624,44 @@ class CommandParser:
         # Parse NBT
         nbt = self.nbt_parser.parse(nbt_str)
 
-        # Process NBT values
-        vel_parser = VelocityParser(self.get_player_yaw(), self.get_player_pitch())
-
-        # Parse velocity if present
-        if 'velocity' in nbt:
-            nbt['velocity'] = vel_parser.parse(nbt['velocity'])
-
-        # Parse acceleration if present
-        if 'acceleration' in nbt:
-            nbt['acceleration'] = vel_parser.parse(nbt['acceleration'])
+        # Parse rotation FIRST (needed for velocity direction)
+        rotation_angle = 0.0
+        rotation_axis = np.array([0, 1, 0])
+        if 'rotation' in nbt:
+            rotation_angle, rotation_axis = RotationParser.parse(nbt['rotation'])
+            nbt['rotation'] = {'angle': rotation_angle, 'axis': rotation_axis}
 
         # Parse spin if present
         if 'spin' in nbt:
             nbt['spin'] = SpinParser.parse(nbt['spin'])
 
-        # Parse rotation if present
-        if 'rotation' in nbt:
-            angle, axis = RotationParser.parse(nbt['rotation'])
-            nbt['rotation'] = {'angle': angle, 'axis': axis}
+        # Parse velocity - use rotation direction if velocity is scalar
+        if 'velocity' in nbt:
+            vel_data = nbt['velocity']
+            if isinstance(vel_data, (int, float)):
+                # Scalar velocity: use rotation direction
+                speed = float(vel_data)
+                # Default direction is +Z, then rotate by angle-axis
+                default_dir = np.array([0.0, 0.0, 1.0])
+                if abs(rotation_angle) > 1e-6:
+                    # Rodrigues' rotation formula
+                    k = rotation_axis
+                    v = default_dir
+                    cos_a = math.cos(rotation_angle)
+                    sin_a = math.sin(rotation_angle)
+                    direction = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
+                else:
+                    direction = default_dir
+                nbt['velocity'] = direction * speed
+            else:
+                # Dict or list format: use VelocityParser
+                vel_parser = VelocityParser(self.get_player_yaw(), self.get_player_pitch())
+                nbt['velocity'] = vel_parser.parse(vel_data)
+
+        # Parse acceleration if present
+        if 'acceleration' in nbt:
+            vel_parser = VelocityParser(self.get_player_yaw(), self.get_player_pitch())
+            nbt['acceleration'] = vel_parser.parse(nbt['acceleration'])
 
         # Convert units
         # mass: g -> kg
