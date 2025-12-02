@@ -517,10 +517,14 @@ class CommandParser:
         return nearest_entity
 
     def _resolve_selector(self, selector: str):
-        """Resolve entity selector (@s, @n[type=...]) to entity"""
-        # @s - current entity in execute context
+        """Resolve entity selector (@s, @n[type=...]) to entity or player"""
+        # @s - current entity in execute context, or player if no context
         if selector == '@s':
-            return self.execute_entity
+            if self.execute_entity is not None:
+                return self.execute_entity
+            else:
+                # Return player as a pseudo-entity
+                return self._get_player_entity()
 
         # @n[type=ball] - nearest ball
         match = re.match(r'@n\[type=(\w+)\]', selector)
@@ -528,6 +532,20 @@ class CommandParser:
             return self._get_nearest_entity(match.group(1))
 
         return None
+
+    def _get_player_entity(self):
+        """Return player as a pseudo-entity with position and rotation"""
+        class PlayerEntity:
+            def __init__(self, game):
+                self.id = "player"
+                self.entity_type = type('EntityType', (), {'value': 'player'})()
+                self.position = game.camera_pos.copy()
+                self.velocity = np.zeros(3)
+                self.active = True
+                # Get angle-axis rotation from game
+                self.orientation_angle, self.orientation_axis = game.get_player_rotation_angle_axis()
+
+        return PlayerEntity(self.game)
 
     def parse(self, command: str) -> Dict[str, Any]:
         """Parse command string."""

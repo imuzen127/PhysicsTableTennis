@@ -26,7 +26,6 @@ import time
 sys.path.insert(0, '.')
 
 from src.physics.parameters import PhysicsParameters, create_offensive_setup
-from src.physics.ball import Ball
 from src.physics.table import Table
 from src.physics.collision import CollisionHandler
 from src.command.parser import CommandParser
@@ -61,24 +60,21 @@ class GameWorld:
         self.params = create_offensive_setup()
         self.params.dt = 0.002
 
-        self.ball = Ball(self.params)
         self.table = Table(self.params)
         self.collision = CollisionHandler(self.params)
 
-        # New command system
+        # Entity system
         self.entity_manager = EntityManager()
         self.command_parser = None  # Initialized after self is ready
 
-        # Ball state
-        self.ball_active = False
-        self.ball_trail = []
-        self.max_trail = 150
-        self.bounce_markers = []
-
-        # Camera - player viewpoint (Y-up coordinate system)
+        # Player state (Y-up coordinate system)
+        # Player is also an entity with angle-axis rotation
         self.camera_pos = np.array([-3.0, 1.5, 2.0])  # [x, height, z]
-        self.camera_yaw = -30.0
-        self.camera_pitch = 15.0
+        self.camera_yaw = -30.0    # Degrees (for backward compat)
+        self.camera_pitch = 15.0   # Degrees (for backward compat)
+        # Player rotation in angle-axis format
+        self.player_rotation_angle = 0.0
+        self.player_rotation_axis = np.array([0.0, 1.0, 0.0])
         self.camera_speed = 0.08
 
         # Mouse sensitivity
@@ -306,93 +302,17 @@ class GameWorld:
             glVertex3f(x + radius * nx, y + height, z + radius * nz)
         glEnd()
 
-    def _draw_ball(self):
-        """Draw ball with trail (Y-up coordinate system)"""
-        if not self.ball_active:
-            # Ghost ball
-            glColor4f(1.0, 0.6, 0.0, 0.3)
-            glPushMatrix()
-            glTranslatef(*self.ball.position)
-            quadric = gluNewQuadric()
-            gluSphere(quadric, self.params.ball_radius, 16, 16)
-            gluDeleteQuadric(quadric)
-            glPopMatrix()
-            return
-
-        # Trail
-        if len(self.ball_trail) > 1:
-            glDisable(GL_LIGHTING)
-            glLineWidth(3.0)
-            glBegin(GL_LINE_STRIP)
-            for i, pos in enumerate(self.ball_trail):
-                alpha = (i / len(self.ball_trail)) ** 0.5
-                glColor4f(1.0, 0.5 + 0.3 * alpha, 0.0, alpha * 0.7)
-                glVertex3f(*pos)
-            glEnd()
-            glEnable(GL_LIGHTING)
-
-        # Bounce markers (on XZ plane, Y is height)
-        glDisable(GL_LIGHTING)
-        for marker in self.bounce_markers[-5:]:
-            glColor4f(0.0, 1.0, 0.0, 0.5)
-            glPushMatrix()
-            glTranslatef(marker[0], marker[1] + 0.003, marker[2])
-            glBegin(GL_LINE_LOOP)
-            for i in range(16):
-                angle = 2 * math.pi * i / 16
-                glVertex3f(0.05 * math.cos(angle), 0, 0.05 * math.sin(angle))
-            glEnd()
-            glPopMatrix()
-        glEnable(GL_LIGHTING)
-
-        # Ball
-        glColor3f(1.0, 0.5, 0.0)
-        glPushMatrix()
-        glTranslatef(*self.ball.position)
-        quadric = gluNewQuadric()
-        gluSphere(quadric, self.params.ball_radius, 20, 20)
-        gluDeleteQuadric(quadric)
-        glPopMatrix()
-
     def update_physics(self):
-        """Update physics"""
-        if not self.ball_active or self.paused:
+        """Update entity physics"""
+        if self.paused:
             return
 
         dt = self.params.dt * self.time_scale
-        self.ball.update(dt)
-        self.flight_time += dt
-
-        speed = self.ball.get_speed()
-        if speed > self.max_speed:
-            self.max_speed = speed
-
-        self.ball_trail.append(self.ball.position.copy())
-        if len(self.ball_trail) > self.max_trail:
-            self.ball_trail.pop(0)
-
-        if self.collision.handle_ball_table_collision(self.ball, self.table):
-            self.bounces += 1
-            self.bounce_markers.append(self.ball.position.copy())
-            self.add_output(f"Bounce #{self.bounces}")
-
-        if self.collision.handle_ball_net_collision(self.ball, self.table):
-            self.add_output("Net!")
-
-        if self.ball.position[1] < 0:
-            self.add_output(f"Landed! Time: {self.flight_time:.2f}s")
-            self.ball_active = False
-        elif np.linalg.norm(self.ball.position[[0, 2]]) > 8:
-            self.add_output("Out of bounds!")
-            self.ball_active = False
-
-        # Update entity manager (new system)
-        if self.entity_manager.simulation_running:
-            self.entity_manager.update(dt, self.params)
+        self.entity_manager.update(dt, self.params)
 
     def handle_movement(self):
         """Handle player movement (Y-up coordinate system)"""
-        if self.console_open or self.menu_open:
+        if self.console_open or self.menu_open or self.data_popup_open:
             return
 
         keys = pygame.key.get_pressed()
@@ -427,6 +347,49 @@ class GameWorld:
         self.camera_yaw += rel[0] * self.mouse_sensitivity  # Y-up: positive = right turn
         self.camera_pitch -= rel[1] * self.mouse_sensitivity
         self.camera_pitch = max(-80, min(80, self.camera_pitch))
+
+        # Update player angle-axis rotation from yaw/pitch
+        self._update_player_rotation()
+
+    def _update_player_rotation(self):
+        """Convert camera yaw/pitch to angle-axis rotation format"""
+        yaw = math.radians(self.camera_yaw)
+        pitch = math.radians(self.camera_pitch)
+
+        # Player forward direction based on yaw/pitch
+        forward = np.array([
+            math.cos(pitch) * math.cos(yaw),
+            math.sin(pitch),
+            math.cos(pitch) * math.sin(yaw)
+        ])
+
+        # Default forward is +X (like racket default)
+        default_forward = np.array([1.0, 0.0, 0.0])
+
+        # Compute rotation axis and angle using cross product and dot product
+        dot = np.dot(default_forward, forward)
+        dot = np.clip(dot, -1.0, 1.0)
+
+        if dot > 0.9999:
+            # No rotation needed
+            self.player_rotation_angle = 0.0
+            self.player_rotation_axis = np.array([0.0, 1.0, 0.0])
+        elif dot < -0.9999:
+            # 180 degree rotation around Y
+            self.player_rotation_angle = math.pi
+            self.player_rotation_axis = np.array([0.0, 1.0, 0.0])
+        else:
+            self.player_rotation_angle = math.acos(dot)
+            axis = np.cross(default_forward, forward)
+            norm = np.linalg.norm(axis)
+            if norm > 1e-6:
+                self.player_rotation_axis = axis / norm
+            else:
+                self.player_rotation_axis = np.array([0.0, 1.0, 0.0])
+
+    def get_player_rotation_angle_axis(self):
+        """Get player rotation as (angle, axis) tuple"""
+        return self.player_rotation_angle, self.player_rotation_axis.copy()
 
     def process_command(self, cmd):
         """Process command - supports both old and new Minecraft-style commands"""
@@ -1231,8 +1194,8 @@ class GameWorld:
     def _draw_racket_entity(self, racket):
         """Draw racket with rubber visualization and orientation line
 
-        Default orientation (angle=0): Red side faces UP (+Y direction)
-        Blade lies in XZ plane, handle points in -Z direction
+        Default orientation (angle=0): Red side faces +X direction
+        Blade is vertical (in YZ plane), handle points down (-Y)
         """
         from src.command.objects import RubberType
 
@@ -1245,9 +1208,9 @@ class GameWorld:
         if abs(angle_deg) > 0.01:
             glRotatef(angle_deg, *racket.orientation_axis)
 
-        # Default orientation: blade horizontal (XZ plane), red side up (+Y)
-        # Rotate blade 90 degrees around X axis so red side (+Y local) faces world +Y
-        glRotatef(-90, 1, 0, 0)
+        # Default orientation: blade vertical (YZ plane), red side faces +X
+        # Rotate blade 90 degrees around Y axis so red side faces +X
+        glRotatef(90, 0, 1, 0)
 
         # Racket dimensions (now blade is in XY plane after rotation)
         blade_width = 0.15   # Width of blade (X)
@@ -1405,15 +1368,15 @@ class GameWorld:
     def _draw_racket_orientation(self, racket):
         """Draw orientation line from racket center (red side direction)
 
-        Default (angle=0): Red side faces UP (+Y)
+        Default (angle=0): Red side faces +X
         The orientation line shows where the red side is facing.
         """
         pos = racket.position
         angle = racket.orientation_angle
         axis = racket.orientation_axis
 
-        # Default direction: positive Y (UP - red side faces up by default)
-        default_dir = np.array([0.0, 1.0, 0.0])
+        # Default direction: positive X (red side faces +X by default)
+        default_dir = np.array([1.0, 0.0, 0.0])
 
         # Apply rotation using Rodrigues' formula
         if abs(angle) > 1e-6:
@@ -1497,8 +1460,7 @@ class GameWorld:
         self._update_camera()
         self._draw_ground()
         self._draw_table()
-        self._draw_ball()
-        self._draw_entities()  # Draw new entity system objects
+        self._draw_entities()
 
         # HUD overlay
         glMatrixMode(GL_PROJECTION)
