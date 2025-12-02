@@ -18,20 +18,63 @@ class EntityType(Enum):
     RACKET = "racket"
 
 
+class RubberType(Enum):
+    """4 types of rubber surfaces"""
+    INVERTED = "inverted"      # 裏ソフト - smooth surface, high spin
+    PIMPLES = "pimples"        # 表ソフト - short pimples, speed oriented
+    LONG_PIMPLES = "long_pimples"  # 粒高 - long pimples, spin reversal
+    ANTI = "anti"              # アンチ - anti-spin, low friction
+
+
+# Default properties for each rubber type
+RUBBER_DEFAULTS = {
+    RubberType.INVERTED: {
+        "friction": 0.9,
+        "spin_coefficient": 1.2,
+        "restitution": 0.85,
+        "spin_reversal": 0.0,  # No spin reversal
+    },
+    RubberType.PIMPLES: {
+        "friction": 0.7,
+        "spin_coefficient": 0.7,
+        "restitution": 0.90,
+        "spin_reversal": 0.1,  # Slight spin disruption
+    },
+    RubberType.LONG_PIMPLES: {
+        "friction": 0.5,
+        "spin_coefficient": 0.3,
+        "restitution": 0.75,
+        "spin_reversal": 0.8,  # High spin reversal
+    },
+    RubberType.ANTI: {
+        "friction": 0.3,
+        "spin_coefficient": 0.1,
+        "restitution": 0.70,
+        "spin_reversal": 0.5,  # Moderate spin absorption
+    },
+}
+
+
 @dataclass
-class RubberData:
-    """Rubber properties for racket"""
-    type: str = "inverted"  # inverted, pimples, anti
-    friction: float = 0.8
-    spin_coefficient: float = 1.0
+class RubberSideData:
+    """Rubber properties for one side of racket"""
+    rubber_type: RubberType = RubberType.INVERTED
+    friction: float = 0.9
+    spin_coefficient: float = 1.2
     restitution: float = 0.85
+    spin_reversal: float = 0.0  # 0=normal, 1=full reversal (for long pimples)
 
-
-@dataclass
-class CoefficientData:
-    """Friction coefficients for racket [red_side, black_side]"""
-    red: float = 0.8
-    black: float = 0.8
+    @classmethod
+    def from_type(cls, rubber_type: RubberType) -> 'RubberSideData':
+        """Create rubber data with defaults for given type"""
+        defaults = RUBBER_DEFAULTS[rubber_type]
+        return cls(
+            rubber_type=rubber_type,
+            friction=defaults["friction"],
+            spin_coefficient=defaults["spin_coefficient"],
+            restitution=defaults["restitution"],
+            spin_reversal=defaults["spin_reversal"],
+        )
 
 
 @dataclass
@@ -73,8 +116,13 @@ class RacketEntity(GameEntity):
     entity_type: EntityType = EntityType.RACKET
     acceleration: np.ndarray = field(default_factory=lambda: np.zeros(3))
     mass: float = 0.18  # 180g typical
-    rubber: RubberData = field(default_factory=RubberData)
-    coefficient: CoefficientData = field(default_factory=CoefficientData)  # [red, black] friction
+    # Rubber for each side (red = forehand, black = backhand typically)
+    rubber_red: RubberSideData = field(default_factory=RubberSideData)
+    rubber_black: RubberSideData = field(default_factory=RubberSideData)
+    # Coefficient [red, black] - friction coefficients
+    coefficient: List[float] = field(default_factory=lambda: [0.9, 0.9])
+    # Restitution [red, black] - bounce coefficients
+    restitution: List[float] = field(default_factory=lambda: [0.85, 0.85])
     orientation_angle: float = 0.0  # Rotation angle in radians
     orientation_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))  # Rotation axis
     # Swing state
@@ -179,33 +227,49 @@ class EntityManager:
             elif isinstance(nbt['acceleration'], list):
                 racket.acceleration = np.array(nbt['acceleration'], dtype=float)
 
-        # Rotation
-        if 'rotation' in nbt:
-            if isinstance(nbt['rotation'], list) and len(nbt['rotation']) >= 2:
-                racket.rotation = np.array(nbt['rotation'][:2], dtype=float)
-
         # Mass
         if 'mass' in nbt:
             racket.mass = float(nbt['mass'])
 
-        # Rubber properties
-        if 'rubber' in nbt:
+        # Rubber properties for red side
+        if 'rubber_red' in nbt:
+            rubber_data = nbt['rubber_red']
+            rubber_type_str = rubber_data.get('type', 'inverted')
+            rubber_type = self._parse_rubber_type(rubber_type_str)
+            racket.rubber_red = RubberSideData.from_type(rubber_type)
+        elif 'rubber' in nbt:
+            # Legacy support: single rubber for both sides
             rubber_data = nbt['rubber']
-            racket.rubber = RubberData(
-                type=rubber_data.get('type', 'inverted'),
-                friction=float(rubber_data.get('friction', 0.8)),
-                spin_coefficient=float(rubber_data.get('spin', 1.0)),
-                restitution=float(rubber_data.get('restitution', 0.85))
-            )
+            if isinstance(rubber_data, str):
+                rubber_type = self._parse_rubber_type(rubber_data)
+                racket.rubber_red = RubberSideData.from_type(rubber_type)
+            elif isinstance(rubber_data, list) and len(rubber_data) >= 2:
+                # [red_type, black_type]
+                racket.rubber_red = RubberSideData.from_type(self._parse_rubber_type(rubber_data[0]))
+                racket.rubber_black = RubberSideData.from_type(self._parse_rubber_type(rubber_data[1]))
+
+        # Rubber properties for black side
+        if 'rubber_black' in nbt:
+            rubber_data = nbt['rubber_black']
+            rubber_type_str = rubber_data.get('type', 'inverted')
+            rubber_type = self._parse_rubber_type(rubber_type_str)
+            racket.rubber_black = RubberSideData.from_type(rubber_type)
 
         # Coefficient [red, black] friction
         if 'coefficient' in nbt:
             coeff = nbt['coefficient']
             if isinstance(coeff, list) and len(coeff) >= 2:
-                racket.coefficient = CoefficientData(
-                    red=float(coeff[0]),
-                    black=float(coeff[1])
-                )
+                racket.coefficient = [float(coeff[0]), float(coeff[1])]
+            elif isinstance(coeff, (int, float)):
+                racket.coefficient = [float(coeff), float(coeff)]
+
+        # Restitution [red, black] bounce coefficients
+        if 'restitution' in nbt:
+            rest = nbt['restitution']
+            if isinstance(rest, list) and len(rest) >= 2:
+                racket.restitution = [float(rest[0]), float(rest[1])]
+            elif isinstance(rest, (int, float)):
+                racket.restitution = [float(rest), float(rest)]
 
         # Rotation (angle + axis)
         if 'rotation' in nbt:
@@ -214,8 +278,23 @@ class EntityManager:
                 racket.orientation_angle = float(rot.get('angle', 0))
                 axis = rot.get('axis', [0, 1, 0])
                 racket.orientation_axis = np.array(axis, dtype=float)
+                norm = np.linalg.norm(racket.orientation_axis)
+                if norm > 0:
+                    racket.orientation_axis = racket.orientation_axis / norm
 
         return racket
+
+    def _parse_rubber_type(self, type_str: str) -> RubberType:
+        """Parse rubber type string to enum"""
+        type_map = {
+            'inverted': RubberType.INVERTED,
+            'pimples': RubberType.PIMPLES,
+            'short_pimples': RubberType.PIMPLES,
+            'long_pimples': RubberType.LONG_PIMPLES,
+            'long': RubberType.LONG_PIMPLES,
+            'anti': RubberType.ANTI,
+        }
+        return type_map.get(type_str.lower(), RubberType.INVERTED)
 
     def kill(self, selector: str) -> int:
         """
