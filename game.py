@@ -28,7 +28,6 @@ sys.path.insert(0, '.')
 from src.physics.parameters import PhysicsParameters, create_offensive_setup
 from src.physics.ball import Ball
 from src.physics.table import Table
-from src.physics.racket import Racket
 from src.physics.collision import CollisionHandler
 from src.command.parser import CommandParser
 from src.command.objects import EntityManager, BallEntity, RacketEntity
@@ -64,7 +63,6 @@ class GameWorld:
 
         self.ball = Ball(self.params)
         self.table = Table(self.params)
-        self.racket = Racket(self.params, side=-1)
         self.collision = CollisionHandler(self.params)
 
         # New command system
@@ -348,40 +346,6 @@ class GameWorld:
         quadric = gluNewQuadric()
         gluSphere(quadric, self.params.ball_radius, 20, 20)
         gluDeleteQuadric(quadric)
-        glPopMatrix()
-
-    def _draw_racket(self):
-        """Draw racket (Y-up coordinate system)"""
-        pos = self.racket.position
-        glPushMatrix()
-        glTranslatef(*pos)
-
-        # Racket dimensions
-        blade_width = 0.15
-        blade_height = 0.16
-        blade_thick = 0.008
-        handle_len = 0.10
-        handle_radius = 0.012
-
-        # Blade (elliptical)
-        glColor3f(0.8, 0.1, 0.1)
-        glPushMatrix()
-        glScalef(blade_width / 2, blade_height / 2, blade_thick / 2)
-        quadric = gluNewQuadric()
-        gluSphere(quadric, 1.0, 16, 12)
-        gluDeleteQuadric(quadric)
-        glPopMatrix()
-
-        # Handle (attached to bottom edge of blade)
-        glColor3f(0.5, 0.35, 0.2)
-        glPushMatrix()
-        glTranslatef(0, -blade_height / 2, 0)
-        glRotatef(90, 1, 0, 0)
-        quadric = gluNewQuadric()
-        gluCylinder(quadric, handle_radius, handle_radius * 0.9, handle_len, 8, 1)
-        gluDeleteQuadric(quadric)
-        glPopMatrix()
-
         glPopMatrix()
 
     def update_physics(self):
@@ -1173,7 +1137,6 @@ class GameWorld:
         self._update_camera()
         self._draw_ground()
         self._draw_table()
-        self._draw_racket()
         self._draw_ball()
         self._draw_entities()  # Draw new entity system objects
 
