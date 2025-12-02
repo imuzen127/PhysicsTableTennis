@@ -463,7 +463,7 @@ class GameWorld:
 
         try:
             # New Minecraft-style commands (case-sensitive for NBT)
-            if command in ['summon', 'execute', 'kill', 'gamemode']:
+            if command in ['summon', 'execute', 'kill', 'gamemode', 'data']:
                 result = self.command_parser.parse(cmd_original)
                 self._handle_parsed_command(result)
                 return
@@ -648,12 +648,82 @@ class GameWorld:
             else:
                 self.add_output(f"Unknown setting: {setting}")
 
+        elif cmd_type == 'data_get':
+            args = result['args']
+            entity = args['entity']
+            path = args['path']
+            nbt_data = self._get_entity_nbt(entity)
+            if path:
+                # Get specific path
+                if path in nbt_data:
+                    self.add_output(f"{path}: {nbt_data[path]}")
+                else:
+                    self.add_output(f"Unknown path: {path}")
+            else:
+                # Show all NBT data
+                self.add_output(f"Entity [{entity.id}] NBT:")
+                for key, value in nbt_data.items():
+                    self.add_output(f"  {key}: {value}")
+
+        elif cmd_type == 'data_modify':
+            args = result['args']
+            entity = args['entity']
+            path = args['path']
+            value = args['value']
+            success = self._set_entity_nbt(entity, path, value)
+            if success:
+                self.add_output(f"Set {path} = {value}")
+            else:
+                self.add_output(f"Failed to set {path}")
+
         elif cmd_type == 'error':
             self.add_output(result.get('message', 'Error'))
 
         elif cmd_type == 'unknown':
             self.add_output(f"Unknown command: {result.get('raw', '')}")
 
+    def _get_entity_nbt(self, entity) -> dict:
+        """Get NBT data from entity"""
+        from src.command.objects import BallEntity, RacketEntity
+
+        nbt = {
+            'id': entity.id,
+            'type': entity.entity_type.value,
+            'position': f"[{entity.position[0]:.3f}, {entity.position[1]:.3f}, {entity.position[2]:.3f}]",
+            'velocity': f"[{entity.velocity[0]:.3f}, {entity.velocity[1]:.3f}, {entity.velocity[2]:.3f}]",
+            'active': entity.active
+        }
+
+        if isinstance(entity, BallEntity):
+            nbt['mass'] = f"{entity.mass * 1000:.1f}g"
+            nbt['radius'] = f"{entity.radius * 1000:.1f}mm"
+            nbt['spin'] = f"[{entity.spin[0]:.1f}, {entity.spin[1]:.1f}, {entity.spin[2]:.1f}]"
+            nbt['rotation'] = f"{{angle:{entity.orientation_angle:.3f}, axis:[{entity.orientation_axis[0]:.2f}, {entity.orientation_axis[1]:.2f}, {entity.orientation_axis[2]:.2f}]}}"
+
+        elif isinstance(entity, RacketEntity):
+            nbt['mass'] = f"{entity.mass * 1000:.1f}g"
+            nbt['rubber'] = entity.rubber.type
+
+        return nbt
+
+    def _set_entity_nbt(self, entity, path: str, value) -> bool:
+        """Set NBT data on entity"""
+        from src.command.objects import BallEntity, RacketEntity
+
+        try:
+            if path == 'mass':
+                # Convert grams to kg
+                entity.mass = float(value) / 1000.0
+            elif path == 'radius' and isinstance(entity, BallEntity):
+                # Convert mm to m
+                entity.radius = float(value) / 1000.0
+            elif path == 'active':
+                entity.active = bool(value)
+            else:
+                return False
+            return True
+        except (ValueError, AttributeError):
+            return False
 
     def add_output(self, text):
         """Add console output"""

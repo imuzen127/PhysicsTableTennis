@@ -432,6 +432,7 @@ class CommandParser:
         # Execute context
         self.execute_rotation = None  # Override rotation from 'execute rotate'
         self.execute_position = None  # Override position from 'execute at'
+        self.execute_entity = None    # Target entity from 'execute as'
 
     def get_player_pos_yup(self) -> np.ndarray:
         """Get player position in Y-up coordinate system"""
@@ -454,9 +455,14 @@ class CommandParser:
 
     def _find_nearest_entity(self, entity_type: str) -> Optional[np.ndarray]:
         """Find nearest entity of type and return its position"""
+        entity = self._get_nearest_entity(entity_type)
+        return entity.position.copy() if entity else None
+
+    def _get_nearest_entity(self, entity_type: str):
+        """Find nearest entity of type and return the entity itself"""
         player_pos = self.get_player_pos_yup()
         nearest_dist = float('inf')
-        nearest_pos = None
+        nearest_entity = None
 
         if entity_type == 'ball':
             entities = self.game.entity_manager.balls
@@ -469,9 +475,22 @@ class CommandParser:
             dist = np.linalg.norm(entity.position - player_pos)
             if dist < nearest_dist:
                 nearest_dist = dist
-                nearest_pos = entity.position.copy()
+                nearest_entity = entity
 
-        return nearest_pos
+        return nearest_entity
+
+    def _resolve_selector(self, selector: str):
+        """Resolve entity selector (@s, @n[type=...]) to entity"""
+        # @s - current entity in execute context
+        if selector == '@s':
+            return self.execute_entity
+
+        # @n[type=ball] - nearest ball
+        match = re.match(r'@n\[type=(\w+)\]', selector)
+        if match:
+            return self._get_nearest_entity(match.group(1))
+
+        return None
 
     def parse(self, command: str) -> Dict[str, Any]:
         """Parse command string."""
@@ -501,6 +520,10 @@ class CommandParser:
         if command.startswith('gamemode '):
             return self._parse_gamemode(command[9:])
 
+        # Handle data command
+        if command.startswith('data '):
+            return self._parse_data(command[5:])
+
         # Handle other commands
         return {'type': 'unknown', 'raw': command}
 
@@ -520,19 +543,41 @@ class CommandParser:
 
             return inner_result
 
-        # execute at @n[type=ball] run <command>
-        match = re.match(r'at\s+@n\[type=(\w+)\]\s+run\s+(.+)', rest)
+        # execute as @n[type=ball] run <command> - set @s to nearest entity
+        match = re.match(r'as\s+(@\w+(?:\[.*?\])?)\s+run\s+(.+)', rest)
         if match:
-            entity_type = match.group(1)
+            selector = match.group(1)
             inner_cmd = match.group(2)
 
-            # Find nearest entity
-            nearest_pos = self._find_nearest_entity(entity_type)
-            if nearest_pos is None:
-                return {'type': 'error', 'message': f'No {entity_type} found'}
+            # Resolve selector to entity
+            entity = self._resolve_selector(selector)
+            if entity is None:
+                return {'type': 'error', 'message': f'No entity found for {selector}'}
+
+            # Set entity context (@s will resolve to this)
+            self.execute_entity = entity
+
+            # Parse inner command
+            inner_result = self.parse(inner_cmd)
+
+            # Clear entity context
+            self.execute_entity = None
+
+            return inner_result
+
+        # execute at @n[type=ball] run <command>
+        match = re.match(r'at\s+(@\w+(?:\[.*?\])?)\s+run\s+(.+)', rest)
+        if match:
+            selector = match.group(1)
+            inner_cmd = match.group(2)
+
+            # Resolve selector to entity
+            entity = self._resolve_selector(selector)
+            if entity is None:
+                return {'type': 'error', 'message': f'No entity found for {selector}'}
 
             # Set position override
-            self.execute_position = nearest_pos
+            self.execute_position = entity.position.copy()
 
             # Parse inner command
             inner_result = self.parse(inner_cmd)
@@ -644,6 +689,58 @@ class CommandParser:
                 'value': value
             }
         }
+
+    def _parse_data(self, rest: str) -> Dict[str, Any]:
+        """
+        Parse data command:
+        - data get entity <selector> [path]
+        - data modify entity <selector> <path> set value <value>
+        """
+        # data get entity <selector>
+        match = re.match(r'get\s+entity\s+(@\w+(?:\[.*?\])?)\s*(.*)', rest)
+        if match:
+            selector = match.group(1)
+            path = match.group(2).strip() if match.group(2) else None
+
+            entity = self._resolve_selector(selector)
+            if entity is None:
+                return {'type': 'error', 'message': f'No entity found for {selector}'}
+
+            return {
+                'type': 'data_get',
+                'args': {
+                    'entity': entity,
+                    'path': path
+                }
+            }
+
+        # data modify entity <selector> <path> set value <value>
+        match = re.match(r'modify\s+entity\s+(@\w+(?:\[.*?\])?)\s+(\w+)\s+set\s+value\s+(.+)', rest)
+        if match:
+            selector = match.group(1)
+            path = match.group(2)
+            value_str = match.group(3).strip()
+
+            entity = self._resolve_selector(selector)
+            if entity is None:
+                return {'type': 'error', 'message': f'No entity found for {selector}'}
+
+            # Parse value (try float, then keep as string)
+            try:
+                value = float(value_str)
+            except ValueError:
+                value = value_str
+
+            return {
+                'type': 'data_modify',
+                'args': {
+                    'entity': entity,
+                    'path': path,
+                    'value': value
+                }
+            }
+
+        return {'type': 'error', 'message': 'Usage: data get/modify entity <selector> ...'}
 
 
 # Utility function to convert Y-up to Z-up (for rendering)
