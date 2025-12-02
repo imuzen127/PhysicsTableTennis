@@ -672,13 +672,17 @@ class CommandParser:
         if 'spin' in nbt:
             nbt['spin'] = SpinParser.parse(nbt['spin'])
 
-        # Parse velocity - use rotation direction if velocity is scalar
+        # Parse velocity
+        # Formats:
+        #   velocity: 0.5  (scalar - use object's rotation direction)
+        #   velocity: [vx, vy, vz]  (direct vector)
+        #   velocity: {angle:1.57, axis:[0,1,0], speed:0.5}  (angle-axis + speed)
+        #   velocity: {rotation:@s, speed:10}  (player direction + speed)
         if 'velocity' in nbt:
             vel_data = nbt['velocity']
             if isinstance(vel_data, (int, float)):
-                # Scalar velocity: use rotation direction
+                # Scalar velocity: use object's rotation direction
                 speed = float(vel_data)
-                # Default direction is +Z, then rotate by angle-axis
                 default_dir = np.array([0.0, 0.0, 1.0])
                 if abs(rotation_angle) > 1e-6:
                     # Rodrigues' rotation formula
@@ -690,10 +694,34 @@ class CommandParser:
                 else:
                     direction = default_dir
                 nbt['velocity'] = direction * speed
-            else:
-                # Dict or list format: use VelocityParser
-                vel_parser = VelocityParser(self.get_player_yaw(), self.get_player_pitch())
-                nbt['velocity'] = vel_parser.parse(vel_data)
+            elif isinstance(vel_data, list):
+                # Direct vector
+                nbt['velocity'] = np.array(vel_data, dtype=float)
+            elif isinstance(vel_data, dict):
+                # Dict format: check for angle-axis or rotation
+                if 'angle' in vel_data and 'axis' in vel_data:
+                    # Angle-axis format: {angle:1.57, axis:[0,1,0], speed:0.5}
+                    vel_angle = float(vel_data.get('angle', 0))
+                    vel_axis = np.array(vel_data.get('axis', [0, 1, 0]), dtype=float)
+                    norm = np.linalg.norm(vel_axis)
+                    if norm > 0:
+                        vel_axis = vel_axis / norm
+                    speed = float(vel_data.get('speed', 0))
+
+                    default_dir = np.array([0.0, 0.0, 1.0])
+                    if abs(vel_angle) > 1e-6:
+                        k = vel_axis
+                        v = default_dir
+                        cos_a = math.cos(vel_angle)
+                        sin_a = math.sin(vel_angle)
+                        direction = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
+                    else:
+                        direction = default_dir
+                    nbt['velocity'] = direction * speed
+                else:
+                    # rotation/@s format: {rotation:@s, speed:10}
+                    vel_parser = VelocityParser(self.get_player_yaw(), self.get_player_pitch())
+                    nbt['velocity'] = vel_parser.parse(vel_data)
 
         # Parse acceleration if present
         if 'acceleration' in nbt:
