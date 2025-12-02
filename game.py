@@ -724,8 +724,7 @@ class GameWorld:
 
         elif isinstance(entity, RacketEntity):
             nbt['mass'] = f"{entity.mass * 1000:.1f}g"
-            nbt['rubber_red'] = entity.rubber_red.rubber_type.value
-            nbt['rubber_black'] = entity.rubber_black.rubber_type.value
+            nbt['rubber'] = f"[{entity.rubber_red.rubber_type.value}, {entity.rubber_black.rubber_type.value}]"
             nbt['coefficient'] = f"[{entity.coefficient[0]:.2f}, {entity.coefficient[1]:.2f}]"
             nbt['restitution'] = f"[{entity.restitution[0]:.2f}, {entity.restitution[1]:.2f}]"
             nbt['rotation'] = f"{{angle:{entity.orientation_angle:.3f}, axis:[{entity.orientation_axis[0]:.2f}, {entity.orientation_axis[1]:.2f}, {entity.orientation_axis[2]:.2f}]}}"
@@ -734,7 +733,7 @@ class GameWorld:
 
     def _set_entity_nbt(self, entity, path: str, value) -> bool:
         """Set NBT data on entity"""
-        from src.command.objects import BallEntity, RacketEntity
+        from src.command.objects import BallEntity, RacketEntity, RubberSideData, RubberType
 
         try:
             if path == 'mass':
@@ -745,11 +744,37 @@ class GameWorld:
                 entity.radius = float(value) / 1000.0
             elif path == 'active':
                 entity.active = bool(value)
+            # Racket-specific properties
+            elif path == 'rubber_red' and isinstance(entity, RacketEntity):
+                rubber_type = self._parse_rubber_type(str(value))
+                entity.rubber_red = RubberSideData.from_type(rubber_type)
+            elif path == 'rubber_black' and isinstance(entity, RacketEntity):
+                rubber_type = self._parse_rubber_type(str(value))
+                entity.rubber_black = RubberSideData.from_type(rubber_type)
+            elif path == 'coefficient' and isinstance(entity, RacketEntity):
+                if isinstance(value, list) and len(value) >= 2:
+                    entity.coefficient = [float(value[0]), float(value[1])]
+            elif path == 'restitution' and isinstance(entity, RacketEntity):
+                if isinstance(value, list) and len(value) >= 2:
+                    entity.restitution = [float(value[0]), float(value[1])]
             else:
                 return False
             return True
         except (ValueError, AttributeError):
             return False
+
+    def _parse_rubber_type(self, type_str: str):
+        """Parse rubber type string to RubberType enum"""
+        from src.command.objects import RubberType
+        type_map = {
+            'inverted': RubberType.INVERTED,
+            'pimples': RubberType.PIMPLES,
+            'short_pimples': RubberType.PIMPLES,
+            'long_pimples': RubberType.LONG_PIMPLES,
+            'long': RubberType.LONG_PIMPLES,
+            'anti': RubberType.ANTI,
+        }
+        return type_map.get(type_str.lower(), RubberType.INVERTED)
 
     def add_output(self, text):
         """Add console output"""
