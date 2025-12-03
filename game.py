@@ -639,7 +639,7 @@ class GameWorld:
             nbt['width'] = f"{entity.width:.3f}m"
             nbt['height'] = f"{entity.height:.3f}m"
             nbt['restitution'] = f"{entity.restitution:.2f}"
-            nbt['friction'] = f"{entity.friction:.2f}"
+            nbt['coefficient'] = f"{entity.coefficient:.2f}"
             nbt['rotation'] = f"{{angle:{entity.orientation_angle:.3f}, axis:[{entity.orientation_axis[0]:.2f}, {entity.orientation_axis[1]:.2f}, {entity.orientation_axis[2]:.2f}]}}"
 
         return nbt
@@ -647,12 +647,27 @@ class GameWorld:
     def _set_entity_nbt(self, entity, path: str, value) -> bool:
         """Set NBT data on entity"""
         from src.command.objects import BallEntity, RacketEntity, TableEntity, RubberSideData, RubberType
+        import numpy as np
 
         try:
             # Common properties
             if path == 'active':
                 entity.active = bool(value)
                 return True
+
+            # Rotation (common to ball, racket, table)
+            if path == 'rotation':
+                if isinstance(value, dict):
+                    if hasattr(entity, 'orientation_angle'):
+                        entity.orientation_angle = float(value.get('angle', 0))
+                        axis = value.get('axis', [0, 1, 0])
+                        if isinstance(axis, list):
+                            entity.orientation_axis = np.array(axis, dtype=float)
+                            norm = np.linalg.norm(entity.orientation_axis)
+                            if norm > 0:
+                                entity.orientation_axis = entity.orientation_axis / norm
+                        return True
+                return False
 
             # Ball properties
             if isinstance(entity, BallEntity):
@@ -702,8 +717,8 @@ class GameWorld:
                 elif path == 'restitution':
                     entity.restitution = float(value)
                     return True
-                elif path == 'friction':
-                    entity.friction = float(value)
+                elif path in ('friction', 'coefficient'):
+                    entity.coefficient = float(value)
                     return True
 
             return False
@@ -967,12 +982,16 @@ class GameWorld:
             # FPS
             fps = self.clock.get_fps()
 
+            # Player rotation in angle-axis format
+            player_angle = self.player_rotation_angle
+            player_axis = self.player_rotation_axis
+
             debug_lines = [
                 f"Table Tennis Physics Simulation",
                 f"",
                 f"XYZ: {self.camera_pos[0]:.3f} / {self.camera_pos[1]:.3f} / {self.camera_pos[2]:.3f}",
-                f"Facing: {facing}",
-                f"Rotation: {yaw:.1f} / {pitch:.1f}",
+                f"Facing: {facing} (yaw:{yaw:.1f} pitch:{pitch:.1f})",
+                f"Rotation: {{angle:{player_angle:.3f}, axis:[{player_axis[0]:.2f},{player_axis[1]:.2f},{player_axis[2]:.2f}]}}",
                 f"Player Speed: {self.camera_speed:.2f}",
                 f"",
                 f"FPS: {fps:.0f}",

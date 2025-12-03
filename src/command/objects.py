@@ -144,7 +144,7 @@ class TableEntity(GameEntity):
     # Physics properties
     mass: float = 100.0  # kg (heavy, essentially immovable)
     restitution: float = 0.85  # Bounce coefficient
-    friction: float = 0.4  # Surface friction
+    coefficient: float = 0.4  # Surface friction coefficient
     # Orientation (angle-axis)
     orientation_angle: float = 0.0
     orientation_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))
@@ -329,8 +329,10 @@ class EntityManager:
             table.mass = float(nbt['mass'])
         if 'restitution' in nbt:
             table.restitution = float(nbt['restitution'])
-        if 'friction' in nbt:
-            table.friction = float(nbt['friction'])
+        if 'coefficient' in nbt:
+            table.coefficient = float(nbt['coefficient'])
+        elif 'friction' in nbt:  # Legacy support
+            table.coefficient = float(nbt['friction'])
 
         # Rotation (angle + axis)
         if 'rotation' in nbt:

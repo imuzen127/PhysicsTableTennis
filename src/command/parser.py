@@ -863,8 +863,21 @@ class CommandParser:
         return {'type': 'error', 'message': 'Usage: data get/modify entity <selector> ...'}
 
     def _parse_data_value(self, value_str: str) -> Any:
-        """Parse value for data modify command - supports lists, numbers, strings"""
+        """Parse value for data modify command - supports dicts, lists, numbers, strings, selectors"""
         value_str = value_str.strip()
+
+        # Selector @s - return player/entity rotation as dict
+        if value_str == '@s':
+            # Get rotation from execute context or player
+            angle, axis = self.get_player_rotation_angle_axis()
+            return {
+                'angle': angle,
+                'axis': axis.tolist()
+            }
+
+        # Dict value (NBT format): {angle:1.57, axis:[0,1,0]}
+        if value_str.startswith('{') and value_str.endswith('}'):
+            return self.nbt_parser.parse(value_str)
 
         # List value: [1.2, 0.9] or ["inverted", "pimples"]
         if value_str.startswith('[') and value_str.endswith(']'):
