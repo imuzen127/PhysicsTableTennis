@@ -560,6 +560,25 @@ class GameWorld:
             func_name = result['args']['name']
             self._run_function(func_name)
 
+        elif cmd_type == 'tp':
+            args = result['args']
+            entity = args['entity']
+            position = args['position']
+            entity.position = position.copy()
+            self.add_output(f"Teleported {entity.id} to ({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f})")
+
+        elif cmd_type == 'rotate':
+            args = result['args']
+            entity = args['entity']
+            angle = args['angle']
+            axis = args['axis']
+            if hasattr(entity, 'orientation_angle'):
+                entity.orientation_angle = angle
+                entity.orientation_axis = axis.copy()
+                self.add_output(f"Rotated {entity.id}")
+            else:
+                self.add_output(f"Entity {entity.id} does not support rotation")
+
         elif cmd_type == 'error':
             self.add_output(result.get('message', 'Error'))
 

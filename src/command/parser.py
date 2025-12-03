@@ -585,6 +585,14 @@ class CommandParser:
         if command.startswith('function '):
             return self._parse_function(command[9:])
 
+        # Handle tp command
+        if command.startswith('tp '):
+            return self._parse_tp(command[3:])
+
+        # Handle rotate command
+        if command.startswith('rotate '):
+            return self._parse_rotate(command[7:])
+
         # Handle other commands
         return {'type': 'unknown', 'raw': command}
 
@@ -861,6 +869,68 @@ class CommandParser:
             }
 
         return {'type': 'error', 'message': 'Usage: data get/modify entity <selector> ...'}
+
+    def _parse_tp(self, rest: str) -> Dict[str, Any]:
+        """
+        Parse tp command: tp <selector> <x> <y> <z>
+        Examples:
+            tp @n[type=ball] 0 1 0
+            tp @n[type=ball] ~ ~1 ~
+        """
+        parts = rest.strip().split()
+        if len(parts) < 4:
+            return {'type': 'error', 'message': 'Usage: tp <selector> <x> <y> <z>'}
+
+        selector = parts[0]
+        x_str, y_str, z_str = parts[1], parts[2], parts[3]
+
+        entity = self._resolve_selector(selector)
+        if entity is None:
+            return {'type': 'error', 'message': f'No entity found for {selector}'}
+
+        # Parse coordinates (supports ~ for relative)
+        coord_parser = CoordinateParser(
+            entity.position,  # Use entity position as base for relative coords
+            self.get_player_yaw(),
+            self.get_player_pitch()
+        )
+        position = coord_parser.parse(x_str, y_str, z_str)
+
+        return {
+            'type': 'tp',
+            'args': {
+                'entity': entity,
+                'position': position
+            }
+        }
+
+    def _parse_rotate(self, rest: str) -> Dict[str, Any]:
+        """
+        Parse rotate command: rotate <selector>
+        Applies player rotation to the entity.
+        Examples:
+            rotate @n[type=ball]
+            rotate @n[type=racket]
+        """
+        selector = rest.strip()
+        if not selector:
+            return {'type': 'error', 'message': 'Usage: rotate <selector>'}
+
+        entity = self._resolve_selector(selector)
+        if entity is None:
+            return {'type': 'error', 'message': f'No entity found for {selector}'}
+
+        # Get player rotation
+        angle, axis = self.get_player_rotation_angle_axis()
+
+        return {
+            'type': 'rotate',
+            'args': {
+                'entity': entity,
+                'angle': angle,
+                'axis': axis
+            }
+        }
 
     def _parse_data_value(self, value_str: str) -> Any:
         """Parse value for data modify command - supports dicts, lists, numbers, strings, selectors"""
