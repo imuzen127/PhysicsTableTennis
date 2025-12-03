@@ -106,11 +106,6 @@ class GameWorld:
         self.data_popup_title = ""
         self.data_popup_close_rect = (0, 0, 0, 0)  # (x, y, w, h) for click detection
 
-        # Stats
-        self.bounces = 0
-        self.max_speed = 0
-        self.flight_time = 0
-
         # Mouse button state for up/down
         self.mouse_side1_held = False  # Button 7 - down
         self.mouse_side2_held = False  # Button 6 - up
@@ -420,70 +415,6 @@ class GameWorld:
                 self.add_output("Stopped simulation")
                 return
 
-            # Legacy commands (kept for compatibility)
-            elif command in ['ball', 'b']:
-                if len(args) >= 3:
-                    pos = np.array([float(args[0]), float(args[1]), float(args[2])])
-                    self.ball.reset(position=pos)
-                    self.ball_active = False
-                    self.ball_trail = []
-                    self.bounce_markers = []
-                    self.add_output(f"Ball at ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f})")
-                else:
-                    self.add_output("Usage: ball <x> <y> <z>")
-
-            elif command in ['launch', 'l', 'fire', 'shoot']:
-                if len(args) >= 3:
-                    vel = np.array([float(args[0]), float(args[1]), float(args[2])])
-                    self.ball.velocity = vel
-                    self.ball_active = True
-                    self.ball_trail = [self.ball.position.copy()]
-                    self.bounce_markers = []
-                    self.bounces = 0
-                    self.max_speed = np.linalg.norm(vel)
-                    self.flight_time = 0
-                    self.add_output(f"Launched! {np.linalg.norm(vel):.1f} m/s")
-                else:
-                    self.add_output("Usage: launch <vx> <vy> <vz>")
-
-            elif command in ['spin', 'sp']:
-                if args:
-                    spin_type = args[0]
-                    rpm = float(args[1]) if len(args) > 1 else 3000
-                    spin_rad = rpm * 2 * math.pi / 60
-                    # Y-up: spin axis for topspin/backspin is Z, for sidespin is Y
-                    if spin_type in ['top', 'topspin', 't']:
-                        self.ball.spin = np.array([0, 0, spin_rad])
-                        self.add_output(f"Topspin {rpm:.0f} RPM")
-                    elif spin_type in ['back', 'backspin', 'b']:
-                        self.ball.spin = np.array([0, 0, -spin_rad])
-                        self.add_output(f"Backspin {rpm:.0f} RPM")
-                    elif spin_type in ['side', 'sidespin', 's']:
-                        self.ball.spin = np.array([0, spin_rad, 0])
-                        self.add_output(f"Sidespin {rpm:.0f} RPM")
-                    elif spin_type in ['none', 'no', '0']:
-                        self.ball.spin = np.array([0, 0, 0])
-                        self.add_output("No spin")
-                else:
-                    self.add_output("Usage: spin <top/back/side> [rpm]")
-
-            elif command in ['serve', 'sv']:
-                power = float(args[0]) if args else 12
-                # Y-up: position is [x, height, z]
-                self.ball.reset(position=np.array([-1.2, 0.9, 0.0]))
-                angle_rad = math.radians(10)
-                # Y-up: velocity is [vx, vy (up), vz]
-                vel = np.array([power * math.cos(angle_rad), power * 0.15 + 1, 0])
-                self.ball.velocity = vel
-                self.ball.spin = np.array([0, 0, 200])  # Topspin on Z axis
-                self.ball_active = True
-                self.ball_trail = [self.ball.position.copy()]
-                self.bounce_markers = []
-                self.bounces = 0
-                self.max_speed = np.linalg.norm(vel)
-                self.flight_time = 0
-                self.add_output(f"Serve! {np.linalg.norm(vel):.1f} m/s")
-
             elif command in ['slow', 'slowmo']:
                 factor = float(args[0]) if args else 0.2
                 self.time_scale = factor
@@ -498,13 +429,6 @@ class GameWorld:
                 self.add_output("Paused" if self.paused else "Resumed")
 
             elif command in ['reset', 'r']:
-                # Y-up: [x, height, z]
-                self.ball.reset(position=np.array([0, 1, 0]))
-                self.ball_active = False
-                self.ball_trail = []
-                self.bounce_markers = []
-                self.bounces = 0
-                self.flight_time = 0
                 self.entity_manager.kill('@e')
                 self.add_output("Reset!")
 
@@ -512,39 +436,34 @@ class GameWorld:
                 if len(args) >= 3:
                     self.camera_pos = np.array([float(args[0]), float(args[1]), float(args[2])])
                     self.add_output(f"TP to ({args[0]}, {args[1]}, {args[2]})")
-                elif args and args[0] == 'ball':
-                    # Y-up: offset is [x, height, z]
-                    self.camera_pos = self.ball.position.copy() + np.array([-1, 0.5, 0])
-                    self.add_output("TP to ball")
                 elif args and args[0] == 'table':
-                    # Y-up: [x, height, z]
                     self.camera_pos = np.array([-2.5, 1.5, 1.5])
                     self.add_output("TP to table view")
 
             elif command in ['help', 'h', '?']:
                 self.add_output("summon, start, stop, kill, tp, reset")
-                self.add_output("ball, launch, spin, serve, slow")
+                self.add_output("function, data get/modify, slow")
 
             elif command in ['clear', 'cls']:
                 self.console_output = []
 
             elif command == 'topspin':
-                # Y-up: ball x height z, launch vx vy vz
-                self.process_command("ball -1 1 0")
-                self.process_command("spin top 4000")
-                self.process_command("launch 12 3 0")
+                # Topspin demo using entity system
+                self.process_command('summon ball -1 1 0 {velocity:[12,3,0],spin:[0,0,4000]}')
+                self.entity_manager.start()
+                self.add_output("Topspin demo started")
 
             elif command == 'backspin':
-                # Y-up: ball x height z, launch vx vy vz
-                self.process_command("ball 1 1.2 0")
-                self.process_command("spin back 3500")
-                self.process_command("launch -8 4 0")
+                # Backspin demo using entity system
+                self.process_command('summon ball 1 1.2 0 {velocity:[-8,4,0],spin:[0,0,-3500]}')
+                self.entity_manager.start()
+                self.add_output("Backspin demo started")
 
             elif command == 'smash':
-                # Y-up: ball x height z, launch vx vy vz
-                self.process_command("ball -1 1.5 0")
-                self.process_command("spin top 2000")
-                self.process_command("launch 20 -2 0")
+                # Smash demo using entity system
+                self.process_command('summon ball -1 1.5 0 {velocity:[20,-2,0],spin:[0,0,2000]}')
+                self.entity_manager.start()
+                self.add_output("Smash demo started")
 
             else:
                 self.add_output(f"Unknown: {command}")
@@ -939,16 +858,18 @@ class GameWorld:
             hint = self.font_small.render("/ - Chat    ESC - Menu", True, (180, 180, 180))
             hud.blit(hint, (15, self.height - 28))
 
-        # Ball status
-        if self.ball_active:
-            speed = self.ball.get_speed()
-            rpm = self.ball.get_spin_rpm()
-            pos = self.ball.position
+        # Entity status (show first active ball)
+        active_balls = [b for b in self.entity_manager.balls if b.active]
+        if active_balls:
+            ball = active_balls[0]
+            speed = np.linalg.norm(ball.velocity)
+            rpm = np.linalg.norm(ball.spin) * 60 / (2 * math.pi)
+            pos = ball.position
             lines = [
                 f"Speed: {speed:.1f} m/s",
                 f"Spin: {rpm:.0f} RPM",
-                f"Height: {pos[1]:.2f} m",  # Y is height in Y-up
-                f"Bounces: {self.bounces}"
+                f"Height: {pos[1]:.2f} m",
+                f"Balls: {len(active_balls)}"
             ]
             y = 15
             for line in lines:
@@ -993,15 +914,20 @@ class GameWorld:
                 f"Time Scale: {self.time_scale}x",
             ]
 
-            if self.ball_active:
-                ball_pos = self.ball.position
-                ball_vel = self.ball.velocity
+            # Show first active ball info
+            active_balls = [b for b in self.entity_manager.balls if b.active]
+            if active_balls:
+                ball = active_balls[0]
+                ball_pos = ball.position
+                ball_vel = ball.velocity
+                ball_speed = np.linalg.norm(ball_vel)
+                ball_rpm = np.linalg.norm(ball.spin) * 60 / (2 * math.pi)
                 debug_lines.extend([
                     f"",
                     f"Ball XYZ: {ball_pos[0]:.3f} / {ball_pos[1]:.3f} / {ball_pos[2]:.3f}",
                     f"Ball Vel: {ball_vel[0]:.2f} / {ball_vel[1]:.2f} / {ball_vel[2]:.2f}",
-                    f"Ball Speed: {self.ball.get_speed():.2f} m/s",
-                    f"Ball Spin: {self.ball.get_spin_rpm():.0f} RPM",
+                    f"Ball Speed: {ball_speed:.2f} m/s",
+                    f"Ball Spin: {ball_rpm:.0f} RPM",
                 ])
 
             # Semi-transparent background
