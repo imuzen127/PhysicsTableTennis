@@ -505,6 +505,8 @@ class CommandParser:
             entities = self.game.entity_manager.balls
         elif entity_type == 'racket':
             entities = self.game.entity_manager.rackets
+        elif entity_type == 'table':
+            entities = self.game.entity_manager.tables
         else:
             return None
 
@@ -846,11 +848,8 @@ class CommandParser:
             if entity is None:
                 return {'type': 'error', 'message': f'No entity found for {selector}'}
 
-            # Parse value (try float, then keep as string)
-            try:
-                value = float(value_str)
-            except ValueError:
-                value = value_str
+            # Parse value - support lists, numbers, and strings
+            value = self._parse_data_value(value_str)
 
             return {
                 'type': 'data_modify',
@@ -862,6 +861,56 @@ class CommandParser:
             }
 
         return {'type': 'error', 'message': 'Usage: data get/modify entity <selector> ...'}
+
+    def _parse_data_value(self, value_str: str) -> Any:
+        """Parse value for data modify command - supports lists, numbers, strings"""
+        value_str = value_str.strip()
+
+        # List value: [1.2, 0.9] or ["inverted", "pimples"]
+        if value_str.startswith('[') and value_str.endswith(']'):
+            inner = value_str[1:-1].strip()
+            if not inner:
+                return []
+            # Split by comma, handling potential spaces
+            parts = [p.strip() for p in inner.split(',')]
+            result = []
+            for part in parts:
+                # Remove quotes if present
+                if (part.startswith('"') and part.endswith('"')) or \
+                   (part.startswith("'") and part.endswith("'")):
+                    result.append(part[1:-1])
+                else:
+                    # Try to parse as number
+                    try:
+                        if '.' in part:
+                            result.append(float(part))
+                        else:
+                            result.append(int(part))
+                    except ValueError:
+                        result.append(part)
+            return result
+
+        # Boolean
+        if value_str.lower() == 'true':
+            return True
+        if value_str.lower() == 'false':
+            return False
+
+        # Number
+        try:
+            if '.' in value_str:
+                return float(value_str)
+            else:
+                return int(value_str)
+        except ValueError:
+            pass
+
+        # String (remove quotes if present)
+        if (value_str.startswith('"') and value_str.endswith('"')) or \
+           (value_str.startswith("'") and value_str.endswith("'")):
+            return value_str[1:-1]
+
+        return value_str
 
 
 # Utility function to convert Y-up to Z-up (for rendering)

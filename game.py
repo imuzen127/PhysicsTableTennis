@@ -29,7 +29,7 @@ from src.physics.parameters import PhysicsParameters, create_offensive_setup
 from src.physics.table import Table
 from src.physics.collision import CollisionHandler
 from src.command.parser import CommandParser
-from src.command.objects import EntityManager, BallEntity, RacketEntity
+from src.command.objects import EntityManager, BallEntity, RacketEntity, TableEntity
 
 
 class GameWorld:
@@ -129,6 +129,9 @@ class GameWorld:
         # Initialize command parser (needs self reference)
         self.command_parser = CommandParser(self)
 
+        # Spawn default table at origin
+        self._spawn_default_table()
+
     def _init_gl(self):
         """Initialize OpenGL"""
         glEnable(GL_DEPTH_TEST)
@@ -156,6 +159,13 @@ class GameWorld:
         glMatrixMode(GL_PROJECTION)
         gluPerspective(60, self.width / self.height, 0.1, 100.0)
         glMatrixMode(GL_MODELVIEW)
+
+    def _spawn_default_table(self):
+        """Spawn the default table at origin"""
+        import numpy as np
+        # Table position is at origin (center of table is at x=0, z=0)
+        # The table surface is at y=0.76 (standard height)
+        self.entity_manager.summon('table', np.array([0.0, 0.0, 0.0]), {})
 
     def _update_camera(self):
         """First-person camera (Y-up coordinate system)"""
@@ -201,12 +211,23 @@ class GameWorld:
 
         glEnable(GL_LIGHTING)
 
-    def _draw_table(self):
-        """Draw table tennis table (Y-up coordinate system)"""
-        hl = self.params.table_length / 2  # X direction
-        hw = self.params.table_width / 2   # Z direction
-        h = self.params.table_height       # Y direction (height)
-        th = 0.03
+    def _draw_table_entity(self, table):
+        """Draw table entity (Y-up coordinate system)"""
+        # Get table properties from entity
+        pos = table.position
+        hl = table.length / 2  # X direction (half length)
+        hw = table.width / 2   # Z direction (half width)
+        h = table.height       # Y direction (surface height)
+        th = table.thickness
+        nh = table.net_height
+
+        glPushMatrix()
+        glTranslatef(*pos)
+
+        # Apply rotation if any
+        angle_deg = math.degrees(table.orientation_angle)
+        if abs(angle_deg) > 0.01:
+            glRotatef(angle_deg, *table.orientation_axis)
 
         # Table top (XZ plane at height Y=h)
         glColor3f(0.0, 0.25, 0.5)
@@ -266,7 +287,6 @@ class GameWorld:
         glEnable(GL_LIGHTING)
 
         # Net (YZ plane at X=0)
-        nh = self.params.table.net_height
         glColor4f(0.95, 0.95, 0.95, 0.9)
         glBegin(GL_QUADS)
         glVertex3f(0, h, -hw - 0.15)
@@ -285,6 +305,8 @@ class GameWorld:
         for lx, lz in [(-hl + 0.15, -hw + 0.1), (-hl + 0.15, hw - 0.1),
                        (hl - 0.15, -hw + 0.1), (hl - 0.15, hw - 0.1)]:
             self._draw_cylinder_yup(lx, 0, lz, 0.025, h - th)
+
+        glPopMatrix()
 
     def _draw_cylinder_yup(self, x, y, z, radius, height, segments=12):
         """Draw cylinder (Y-up: cylinder extends in Y direction)"""
@@ -588,7 +610,7 @@ class GameWorld:
 
     def _get_entity_nbt(self, entity) -> dict:
         """Get NBT data from entity"""
-        from src.command.objects import BallEntity, RacketEntity
+        from src.command.objects import BallEntity, RacketEntity, TableEntity
 
         nbt = {
             'id': entity.id,
@@ -611,37 +633,80 @@ class GameWorld:
             nbt['restitution'] = f"[{entity.restitution[0]:.2f}, {entity.restitution[1]:.2f}]"
             nbt['rotation'] = f"{{angle:{entity.orientation_angle:.3f}, axis:[{entity.orientation_axis[0]:.2f}, {entity.orientation_axis[1]:.2f}, {entity.orientation_axis[2]:.2f}]}}"
 
+        elif isinstance(entity, TableEntity):
+            nbt['mass'] = f"{entity.mass:.1f}kg"
+            nbt['length'] = f"{entity.length:.3f}m"
+            nbt['width'] = f"{entity.width:.3f}m"
+            nbt['height'] = f"{entity.height:.3f}m"
+            nbt['restitution'] = f"{entity.restitution:.2f}"
+            nbt['friction'] = f"{entity.friction:.2f}"
+            nbt['rotation'] = f"{{angle:{entity.orientation_angle:.3f}, axis:[{entity.orientation_axis[0]:.2f}, {entity.orientation_axis[1]:.2f}, {entity.orientation_axis[2]:.2f}]}}"
+
         return nbt
 
     def _set_entity_nbt(self, entity, path: str, value) -> bool:
         """Set NBT data on entity"""
-        from src.command.objects import BallEntity, RacketEntity, RubberSideData, RubberType
+        from src.command.objects import BallEntity, RacketEntity, TableEntity, RubberSideData, RubberType
 
         try:
-            if path == 'mass':
-                # Convert grams to kg
-                entity.mass = float(value) / 1000.0
-            elif path == 'radius' and isinstance(entity, BallEntity):
-                # Convert mm to m
-                entity.radius = float(value) / 1000.0
-            elif path == 'active':
+            # Common properties
+            if path == 'active':
                 entity.active = bool(value)
-            # Racket-specific properties
-            elif path == 'rubber_red' and isinstance(entity, RacketEntity):
-                rubber_type = self._parse_rubber_type(str(value))
-                entity.rubber_red = RubberSideData.from_type(rubber_type)
-            elif path == 'rubber_black' and isinstance(entity, RacketEntity):
-                rubber_type = self._parse_rubber_type(str(value))
-                entity.rubber_black = RubberSideData.from_type(rubber_type)
-            elif path == 'coefficient' and isinstance(entity, RacketEntity):
-                if isinstance(value, list) and len(value) >= 2:
-                    entity.coefficient = [float(value[0]), float(value[1])]
-            elif path == 'restitution' and isinstance(entity, RacketEntity):
-                if isinstance(value, list) and len(value) >= 2:
-                    entity.restitution = [float(value[0]), float(value[1])]
-            else:
-                return False
-            return True
+                return True
+
+            # Ball properties
+            if isinstance(entity, BallEntity):
+                if path == 'mass':
+                    entity.mass = float(value) / 1000.0  # g -> kg
+                    return True
+                elif path == 'radius':
+                    entity.radius = float(value) / 1000.0  # mm -> m
+                    return True
+
+            # Racket properties
+            elif isinstance(entity, RacketEntity):
+                if path == 'mass':
+                    entity.mass = float(value) / 1000.0  # g -> kg
+                    return True
+                elif path == 'rubber_red':
+                    rubber_type = self._parse_rubber_type(str(value))
+                    entity.rubber_red = RubberSideData.from_type(rubber_type)
+                    return True
+                elif path == 'rubber_black':
+                    rubber_type = self._parse_rubber_type(str(value))
+                    entity.rubber_black = RubberSideData.from_type(rubber_type)
+                    return True
+                elif path == 'coefficient':
+                    if isinstance(value, list) and len(value) >= 2:
+                        entity.coefficient = [float(value[0]), float(value[1])]
+                        return True
+                elif path == 'restitution':
+                    if isinstance(value, list) and len(value) >= 2:
+                        entity.restitution = [float(value[0]), float(value[1])]
+                        return True
+
+            # Table properties
+            elif isinstance(entity, TableEntity):
+                if path == 'mass':
+                    entity.mass = float(value)  # kg (no conversion)
+                    return True
+                elif path == 'length':
+                    entity.length = float(value)
+                    return True
+                elif path == 'width':
+                    entity.width = float(value)
+                    return True
+                elif path == 'height':
+                    entity.height = float(value)
+                    return True
+                elif path == 'restitution':
+                    entity.restitution = float(value)
+                    return True
+                elif path == 'friction':
+                    entity.friction = float(value)
+                    return True
+
+            return False
         except (ValueError, AttributeError):
             return False
 
@@ -1379,13 +1444,16 @@ class GameWorld:
         for racket in self.entity_manager.rackets:
             self._draw_racket_entity(racket)
 
+        # Draw tables
+        for table in self.entity_manager.tables:
+            self._draw_table_entity(table)
+
     def render(self):
         """Main render"""
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         self._update_camera()
         self._draw_ground()
-        self._draw_table()
         self._draw_entities()
 
         # HUD overlay

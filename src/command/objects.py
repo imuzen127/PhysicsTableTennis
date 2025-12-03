@@ -16,6 +16,7 @@ import uuid
 class EntityType(Enum):
     BALL = "ball"
     RACKET = "racket"
+    TABLE = "table"
 
 
 class RubberType(Enum):
@@ -130,6 +131,25 @@ class RacketEntity(GameEntity):
     swing_time: float = 0.0
 
 
+@dataclass
+class TableEntity(GameEntity):
+    """Table entity with physics properties"""
+    entity_type: EntityType = EntityType.TABLE
+    # Table dimensions (ITTF standard: 2.74m x 1.525m, height 0.76m)
+    length: float = 2.74  # X direction
+    width: float = 1.525  # Z direction
+    height: float = 0.76  # Surface height (Y)
+    thickness: float = 0.03  # Table top thickness
+    net_height: float = 0.1525  # Net height above table
+    # Physics properties
+    mass: float = 100.0  # kg (heavy, essentially immovable)
+    restitution: float = 0.85  # Bounce coefficient
+    friction: float = 0.4  # Surface friction
+    # Orientation (angle-axis)
+    orientation_angle: float = 0.0
+    orientation_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))
+
+
 class EntityManager:
     """Manages all game entities"""
 
@@ -137,6 +157,7 @@ class EntityManager:
         self.entities: Dict[str, GameEntity] = {}
         self.balls: List[BallEntity] = []
         self.rackets: List[RacketEntity] = []
+        self.tables: List[TableEntity] = []
         self.simulation_running: bool = False
 
     def summon(self, entity_type: str, position: np.ndarray, nbt: Dict[str, Any]) -> GameEntity:
@@ -157,6 +178,9 @@ class EntityManager:
         elif entity_type == "racket":
             entity = self._create_racket(position, nbt)
             self.rackets.append(entity)
+        elif entity_type == "table":
+            entity = self._create_table(position, nbt)
+            self.tables.append(entity)
         else:
             raise ValueError(f"Unknown entity type: {entity_type}")
 
@@ -284,6 +308,43 @@ class EntityManager:
 
         return racket
 
+    def _create_table(self, position: np.ndarray, nbt: Dict[str, Any]) -> TableEntity:
+        """Create a table entity from NBT data"""
+        table = TableEntity(position=position.copy())
+
+        # Dimensions
+        if 'length' in nbt:
+            table.length = float(nbt['length'])
+        if 'width' in nbt:
+            table.width = float(nbt['width'])
+        if 'height' in nbt:
+            table.height = float(nbt['height'])
+        if 'thickness' in nbt:
+            table.thickness = float(nbt['thickness'])
+        if 'net_height' in nbt:
+            table.net_height = float(nbt['net_height'])
+
+        # Physics
+        if 'mass' in nbt:
+            table.mass = float(nbt['mass'])
+        if 'restitution' in nbt:
+            table.restitution = float(nbt['restitution'])
+        if 'friction' in nbt:
+            table.friction = float(nbt['friction'])
+
+        # Rotation (angle + axis)
+        if 'rotation' in nbt:
+            rot = nbt['rotation']
+            if isinstance(rot, dict):
+                table.orientation_angle = float(rot.get('angle', 0))
+                axis = rot.get('axis', [0, 1, 0])
+                table.orientation_axis = np.array(axis, dtype=float)
+                norm = np.linalg.norm(table.orientation_axis)
+                if norm > 0:
+                    table.orientation_axis = table.orientation_axis / norm
+
+        return table
+
     def _parse_rubber_type(self, type_str: str) -> RubberType:
         """Parse rubber type string to enum"""
         type_map = {
@@ -314,6 +375,7 @@ class EntityManager:
             self.entities.clear()
             self.balls.clear()
             self.rackets.clear()
+            self.tables.clear()
         elif selector.startswith('@e[type='):
             # Kill by type
             type_match = selector[8:-1]  # Extract type from @e[type=X]
@@ -338,6 +400,8 @@ class EntityManager:
             self.balls.remove(entity)
         if isinstance(entity, RacketEntity) and entity in self.rackets:
             self.rackets.remove(entity)
+        if isinstance(entity, TableEntity) and entity in self.tables:
+            self.tables.remove(entity)
 
     def start(self):
         """Start simulation for all entities"""
