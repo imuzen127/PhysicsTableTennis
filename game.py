@@ -1223,8 +1223,10 @@ class GameWorld:
     def _draw_racket_entity(self, racket):
         """Draw racket with rubber visualization and orientation line
 
-        Default orientation (angle=0): Red side faces +X direction
-        Blade is vertical (in YZ plane), handle points down (-Y)
+        Default orientation (angle=0):
+        - Blade is horizontal (XZ plane)
+        - Red side faces +Y (up)
+        - Handle points +Z direction
         """
         from src.command.objects import RubberType
 
@@ -1237,40 +1239,35 @@ class GameWorld:
         if abs(angle_deg) > 0.01:
             glRotatef(angle_deg, *racket.orientation_axis)
 
-        # Default orientation: blade vertical (YZ plane), red side faces +X
-        # Rotate blade 90 degrees around Y axis so red side faces +X
-        glRotatef(90, 0, 1, 0)
-
-        # Racket dimensions (now blade is in XY plane after rotation)
-        blade_width = 0.15   # Width of blade (X)
-        blade_height = 0.16  # Height of blade (Y, but becomes Z after rotation)
-        blade_thick = 0.006  # Thickness of blade core (was Z, becomes Y)
-        rubber_thick = 0.002  # Rubber thickness
-        handle_len = 0.10    # Handle length
+        # Racket dimensions
+        blade_width = 0.15   # X direction
+        blade_length = 0.16  # Z direction
+        blade_thick = 0.006  # Y direction (thickness)
+        rubber_thick = 0.002
+        handle_len = 0.10
         handle_radius = 0.012
 
-        # Draw blade core (wood) - ellipsoid in XY, thin in Z (which is now world Y direction)
+        # Draw blade core (wood) - ellipsoid in XZ plane, thin in Y
         glColor3f(0.6, 0.45, 0.25)  # Wood color
         glPushMatrix()
-        glScalef(blade_width / 2, blade_height / 2, blade_thick / 2)
+        glScalef(blade_width / 2, blade_thick / 2, blade_length / 2)
         quadric = gluNewQuadric()
         gluSphere(quadric, 1.0, 16, 12)
         gluDeleteQuadric(quadric)
         glPopMatrix()
 
-        # Draw red side rubber (+Z side in local coords = +Y in world when flat)
-        self._draw_rubber_surface(racket.rubber_red, blade_width, blade_height,
-                                  blade_thick / 2 + rubber_thick / 2, rubber_thick, True)
+        # Draw red side rubber (+Y side, facing up)
+        self._draw_rubber_surface_horizontal(racket.rubber_red, blade_width, blade_length,
+                                             blade_thick / 2 + rubber_thick / 2, rubber_thick, True)
 
-        # Draw black side rubber (-Z side in local coords = -Y in world when flat)
-        self._draw_rubber_surface(racket.rubber_black, blade_width, blade_height,
-                                  -(blade_thick / 2 + rubber_thick / 2), rubber_thick, False)
+        # Draw black side rubber (-Y side, facing down)
+        self._draw_rubber_surface_horizontal(racket.rubber_black, blade_width, blade_length,
+                                             -(blade_thick / 2 + rubber_thick / 2), rubber_thick, False)
 
-        # Handle (attached to bottom edge of blade, extends in -Y local = -Z world when flat)
+        # Handle (attached to +Z edge of blade, extends in +Z direction)
         glColor3f(0.5, 0.35, 0.2)
         glPushMatrix()
-        glTranslatef(0, -blade_height / 2, 0)  # Move to bottom of blade (local -Y)
-        glRotatef(90, 1, 0, 0)  # Rotate cylinder to point in local -Y direction
+        glTranslatef(0, 0, blade_length / 2)  # Move to +Z edge of blade
         quadric = gluNewQuadric()
         gluCylinder(quadric, handle_radius, handle_radius * 0.9, handle_len, 8, 1)
         gluDeleteQuadric(quadric)
@@ -1394,18 +1391,129 @@ class GameWorld:
 
         gluDeleteQuadric(quadric)
 
+    def _draw_rubber_surface_horizontal(self, rubber, width, length, y_offset, thickness, is_red_side):
+        """Draw rubber surface for horizontal blade (XZ plane)"""
+        from src.command.objects import RubberType
+
+        # Base color
+        if is_red_side:
+            base_color = (0.85, 0.1, 0.1)  # Red
+        else:
+            base_color = (0.15, 0.15, 0.15)  # Black
+
+        rubber_type = rubber.rubber_type
+
+        glPushMatrix()
+        glTranslatef(0, y_offset, 0)
+
+        if rubber_type == RubberType.INVERTED:
+            # 裏ソフト: Smooth glossy surface
+            glColor3f(*base_color)
+            glPushMatrix()
+            glScalef(width / 2 * 0.95, thickness / 2, length / 2 * 0.95)
+            quadric = gluNewQuadric()
+            gluSphere(quadric, 1.0, 16, 12)
+            gluDeleteQuadric(quadric)
+            glPopMatrix()
+
+        elif rubber_type == RubberType.PIMPLES:
+            # 表ソフト: Short pimples
+            glColor3f(*base_color)
+            glPushMatrix()
+            glScalef(width / 2 * 0.95, thickness / 4, length / 2 * 0.95)
+            quadric = gluNewQuadric()
+            gluSphere(quadric, 1.0, 16, 12)
+            gluDeleteQuadric(quadric)
+            glPopMatrix()
+            self._draw_pimples_pattern_horizontal(width * 0.85, length * 0.85, thickness,
+                                                  pimple_radius=0.004, spacing=0.015,
+                                                  is_red_side=is_red_side, facing_up=is_red_side)
+
+        elif rubber_type == RubberType.LONG_PIMPLES:
+            # 粒高: Long pimples
+            glColor3f(*base_color)
+            glPushMatrix()
+            glScalef(width / 2 * 0.95, thickness / 4, length / 2 * 0.95)
+            quadric = gluNewQuadric()
+            gluSphere(quadric, 1.0, 16, 12)
+            gluDeleteQuadric(quadric)
+            glPopMatrix()
+            self._draw_pimples_pattern_horizontal(width * 0.85, length * 0.85, thickness * 2,
+                                                  pimple_radius=0.003, spacing=0.012,
+                                                  is_red_side=is_red_side, facing_up=is_red_side,
+                                                  is_long=True)
+
+        elif rubber_type == RubberType.ANTI:
+            # アンチ: Matte surface
+            dark_color = (base_color[0] * 0.7, base_color[1] * 0.7, base_color[2] * 0.7)
+            glColor3f(*dark_color)
+            glPushMatrix()
+            glScalef(width / 2 * 0.95, thickness / 2, length / 2 * 0.95)
+            quadric = gluNewQuadric()
+            gluSphere(quadric, 1.0, 16, 12)
+            gluDeleteQuadric(quadric)
+            glPopMatrix()
+
+        glPopMatrix()
+
+    def _draw_pimples_pattern_horizontal(self, width, length, pip_height, pimple_radius, spacing,
+                                         is_red_side, facing_up=True, is_long=False):
+        """Draw pimples pattern on horizontal rubber surface (XZ plane)"""
+        if is_red_side:
+            glColor3f(0.9, 0.2, 0.2)
+        else:
+            glColor3f(0.25, 0.25, 0.25)
+
+        quadric = gluNewQuadric()
+
+        cols = int(width / spacing)
+        rows = int(length / spacing)
+
+        start_x = -width / 2 + spacing / 2
+        start_z = -length / 2 + spacing / 2
+
+        direction = 1 if facing_up else -1
+
+        for row in range(rows):
+            for col in range(cols):
+                x = start_x + col * spacing
+                z = start_z + row * spacing
+
+                # Check if inside ellipse
+                if (x / (width / 2)) ** 2 + (z / (length / 2)) ** 2 > 0.85:
+                    continue
+
+                glPushMatrix()
+                glTranslatef(x, 0, z)
+
+                if is_long:
+                    # Long pimples with slight tilt
+                    tilt_x = math.sin(x * 50 + z * 30) * 8
+                    tilt_z = math.cos(x * 30 + z * 50) * 8
+                    glRotatef(90 * direction, 1, 0, 0)  # Point up or down
+                    glRotatef(tilt_x, 1, 0, 0)
+                    glRotatef(tilt_z, 0, 0, 1)
+                    gluCylinder(quadric, pimple_radius, pimple_radius * 0.7, pip_height, 6, 1)
+                else:
+                    # Short pimples
+                    gluSphere(quadric, pimple_radius, 6, 4)
+
+                glPopMatrix()
+
+        gluDeleteQuadric(quadric)
+
     def _draw_racket_orientation(self, racket):
         """Draw orientation line from racket center (red side direction)
 
-        Default (angle=0): Red side faces +X
+        Default (angle=0): Red side faces +Y (up)
         The orientation line shows where the red side is facing.
         """
         pos = racket.position
         angle = racket.orientation_angle
         axis = racket.orientation_axis
 
-        # Default direction: positive X (red side faces +X by default)
-        default_dir = np.array([1.0, 0.0, 0.0])
+        # Default direction: positive Y (red side faces up by default)
+        default_dir = np.array([0.0, 1.0, 0.0])
 
         # Apply rotation using Rodrigues' formula
         if abs(angle) > 1e-6:
