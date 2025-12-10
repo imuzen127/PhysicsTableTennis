@@ -500,7 +500,8 @@ class EntityManager:
             ball.trail.pop(0)
 
         # Spin decay
-        ball.spin = ball.spin * (1.0 - params.spin_decay_rate * dt)
+        spin_decay_factor = params.get_spin_decay_factor(dt)
+        ball.spin = ball.spin * spin_decay_factor
 
     def _check_collisions(self, params):
         """Check and handle collisions"""
