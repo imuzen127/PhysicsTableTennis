@@ -533,9 +533,104 @@ class EntityManager:
                 ball.velocity[1] = -ball.velocity[1] * 0.85
                 ball.bounce_count += 1
 
+            # Ball-Racket collision
+            for racket in self.rackets:
+                self._check_ball_racket_collision(ball, racket)
+
             # Out of bounds
             if ball.position[1] < -1 or np.linalg.norm(ball.position) > 10:
                 ball.active = False
+
+    def _check_ball_racket_collision(self, ball: BallEntity, racket: RacketEntity):
+        """Check and handle ball-racket collision"""
+        # Racket dimensions
+        blade_width = 0.15   # X direction
+        blade_length = 0.16  # Z direction
+        blade_thick = 0.01   # Y direction (including rubber)
+
+        # Get ball position relative to racket
+        rel_pos = ball.position - racket.position
+
+        # Apply inverse rotation to get position in racket's local frame
+        angle = racket.orientation_angle
+        axis = racket.orientation_axis
+
+        if abs(angle) > 1e-6:
+            # Inverse rotation using Rodrigues' formula with -angle
+            k = axis
+            v = rel_pos
+            cos_a = math.cos(-angle)
+            sin_a = math.sin(-angle)
+            local_pos = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
+        else:
+            local_pos = rel_pos
+
+        # Check if ball is within racket bounds (elliptical blade in XZ plane)
+        # Local coords: X = width, Y = thickness (up), Z = length
+        x_norm = local_pos[0] / (blade_width / 2)
+        z_norm = local_pos[2] / (blade_length / 2)
+        in_ellipse = (x_norm ** 2 + z_norm ** 2) <= 1.0
+
+        # Check Y distance (thickness)
+        y_dist = abs(local_pos[1])
+        collision_dist = blade_thick / 2 + ball.radius
+
+        if in_ellipse and y_dist < collision_dist:
+            # Collision detected!
+            # Determine which side was hit (red = +Y, black = -Y in local)
+            is_red_side = local_pos[1] > 0
+
+            # Get rubber properties
+            if is_red_side:
+                rubber = racket.rubber_red
+                restitution = racket.restitution[0]
+                friction = racket.coefficient[0]
+            else:
+                rubber = racket.rubber_black
+                restitution = racket.restitution[1]
+                friction = racket.coefficient[1]
+
+            # Calculate normal in world coordinates
+            local_normal = np.array([0.0, 1.0 if is_red_side else -1.0, 0.0])
+
+            if abs(angle) > 1e-6:
+                # Rotate normal to world frame
+                k = axis
+                v = local_normal
+                cos_a = math.cos(angle)
+                sin_a = math.sin(angle)
+                world_normal = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
+            else:
+                world_normal = local_normal
+
+            # Relative velocity (ball relative to racket)
+            rel_vel = ball.velocity - racket.velocity
+
+            # Velocity component along normal
+            vel_normal = np.dot(rel_vel, world_normal)
+
+            # Only process if ball is approaching the surface
+            if vel_normal < 0:
+                # Reflect velocity
+                ball.velocity = ball.velocity - (1 + restitution) * vel_normal * world_normal
+
+                # Add racket velocity contribution
+                ball.velocity = ball.velocity + racket.velocity * 0.8
+
+                # Apply spin from rubber friction
+                # Tangential velocity
+                vel_tangent = rel_vel - vel_normal * world_normal
+                if np.linalg.norm(vel_tangent) > 0:
+                    # Add spin based on tangential velocity and friction
+                    spin_axis = np.cross(world_normal, vel_tangent)
+                    if np.linalg.norm(spin_axis) > 0:
+                        spin_axis = spin_axis / np.linalg.norm(spin_axis)
+                        spin_magnitude = np.linalg.norm(vel_tangent) * friction * 50  # Spin factor
+                        ball.spin = ball.spin + spin_axis * spin_magnitude
+
+                # Push ball out of racket
+                penetration = collision_dist - y_dist
+                ball.position = ball.position + world_normal * (penetration + 0.001)
 
     def get_entity(self, entity_id: str) -> Optional[GameEntity]:
         """Get entity by ID"""
