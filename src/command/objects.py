@@ -461,7 +461,7 @@ class EntityManager:
 
         # Get air properties from params
         air_density = params.air_density
-        drag_coeff = params.air_drag_coeff()
+        drag_coeff = params.air_drag_coeff
 
         # Air drag
         speed = np.linalg.norm(ball.velocity)
