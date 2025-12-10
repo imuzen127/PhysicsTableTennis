@@ -1226,7 +1226,7 @@ class GameWorld:
         Default orientation (angle=0):
         - Blade is horizontal (XZ plane)
         - Red side faces +Y (up)
-        - Handle points +Z direction
+        - Handle points -Z direction
         """
         from src.command.objects import RubberType
 
@@ -1264,10 +1264,11 @@ class GameWorld:
         self._draw_rubber_surface_horizontal(racket.rubber_black, blade_width, blade_length,
                                              -(blade_thick / 2 + rubber_thick / 2), rubber_thick, False)
 
-        # Handle (attached to +Z edge of blade, extends in +Z direction)
+        # Handle (attached to -Z edge of blade, extends in -Z direction)
         glColor3f(0.5, 0.35, 0.2)
         glPushMatrix()
-        glTranslatef(0, 0, blade_length / 2)  # Move to +Z edge of blade
+        glTranslatef(0, 0, -blade_length / 2)  # Move to -Z edge of blade
+        glRotatef(180, 1, 0, 0)  # Flip to point in -Z direction
         quadric = gluNewQuadric()
         gluCylinder(quadric, handle_radius, handle_radius * 0.9, handle_len, 8, 1)
         gluDeleteQuadric(quadric)
