@@ -459,10 +459,14 @@ class EntityManager:
         # Gravity (Y is up)
         gravity = np.array([0, -params.gravity, 0])
 
+        # Get air properties from params
+        air_density = params.air_density
+        drag_coeff = params.air_drag_coeff()
+
         # Air drag
         speed = np.linalg.norm(ball.velocity)
         if speed > 0:
-            drag_force = -0.5 * params.air_density * params.drag_coefficient * \
+            drag_force = -0.5 * air_density * drag_coeff * \
                         (math.pi * ball.radius ** 2) * speed * ball.velocity
             drag_accel = drag_force / ball.mass
         else:
@@ -479,7 +483,7 @@ class EntityManager:
             lift_dir = np.cross(ball.spin, ball.velocity)
             if np.linalg.norm(lift_dir) > 0:
                 lift_dir = lift_dir / np.linalg.norm(lift_dir)
-                lift_force = 0.5 * params.air_density * Cl * \
+                lift_force = 0.5 * air_density * Cl * \
                             (math.pi * ball.radius ** 2) * speed ** 2 * lift_dir
                 magnus_accel = lift_force / ball.mass
             else:
