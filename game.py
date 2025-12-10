@@ -421,7 +421,7 @@ class GameWorld:
 
         try:
             # New Minecraft-style commands (case-sensitive for NBT)
-            if command in ['summon', 'execute', 'kill', 'gamemode', 'data']:
+            if command in ['summon', 'execute', 'kill', 'gamemode', 'data', 'function', 'tp', 'rotate']:
                 result = self.command_parser.parse(cmd_original)
                 self._handle_parsed_command(result)
                 return
