@@ -816,24 +816,32 @@ class GameWorld:
             # Velocity (common - supports angle-axis format)
             if path == 'velocity':
                 if isinstance(value, dict):
-                    # angle-axis format: {angle:1.57, axis:[0,1,0], speed:3.0}
+                    # Format: {angle:X, axis:[x,y,z], speed:N}
+                    # axis = direction of movement
+                    # angle = rotation around axis (for fine-tuning, usually 0)
+                    # speed = magnitude
                     angle = float(value.get('angle', 0))
-                    axis = np.array(value.get('axis', [0, 1, 0]), dtype=float)
+                    axis = np.array(value.get('axis', [0, 0, 1]), dtype=float)
                     norm = np.linalg.norm(axis)
                     if norm > 0:
                         axis = axis / norm
                     speed = float(value.get('speed', 0))
-                    
-                    # Convert to velocity vector using Rodrigues formula
-                    default_dir = np.array([0.0, 0.0, 1.0])
+
+                    # Use axis as the base direction
+                    # If angle is specified, rotate around perpendicular axis
                     if abs(angle) > 1e-6:
-                        k = axis
-                        v = default_dir
+                        # Find a perpendicular axis to rotate around
+                        if abs(axis[1]) < 0.9:
+                            perp = np.cross(axis, np.array([0, 1, 0]))
+                        else:
+                            perp = np.cross(axis, np.array([1, 0, 0]))
+                        perp = perp / np.linalg.norm(perp)
+                        # Rodrigues rotation of axis around perp by angle
                         cos_a = np.cos(angle)
                         sin_a = np.sin(angle)
-                        direction = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
+                        direction = axis * cos_a + np.cross(perp, axis) * sin_a + perp * np.dot(perp, axis) * (1 - cos_a)
                     else:
-                        direction = default_dir
+                        direction = axis
                     entity.velocity = direction * speed
                     return True
                 elif isinstance(value, list):
