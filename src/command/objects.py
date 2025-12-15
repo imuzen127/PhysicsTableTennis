@@ -145,11 +145,19 @@ class TableEntity(GameEntity):
     width: float = 1.525  # Z direction
     height: float = 0.76  # Surface height (Y)
     thickness: float = 0.03  # Table top thickness
-    net_height: float = 0.1525  # Net height above table
-    # Physics properties
+    # Net properties (ITTF standard)
+    net_height: float = 0.1525  # 15.25cm above table
+    net_length: float = 1.83  # 183cm total (extends 15.25cm beyond table each side)
+    net_tape_width: float = 0.015  # White tape at top: 15mm
+    # Net physics
+    net_tape_restitution: float = 0.75  # Top tape: high bounce (0.7-0.8)
+    net_tape_friction: float = 0.3  # Low friction - ball slides over
+    net_mesh_restitution: float = 0.15  # Mesh: absorbs energy (0.1-0.2)
+    net_mesh_friction: float = 0.6  # Higher friction - ball gets caught
+    # Table physics properties
     mass: float = 100.0  # kg (heavy, essentially immovable)
     restitution: float = 0.85  # Bounce coefficient
-    coefficient: float = 0.4  # Surface friction (same as racket's coefficient)
+    coefficient: float = 0.4  # Surface friction
     # Orientation (angle-axis)
     orientation_angle: float = 0.0
     orientation_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))
@@ -629,6 +637,12 @@ class EntityManager:
                     ball.bounce_count += 1
                     break  # Only collide with one table
 
+            # Ball-Net collision
+            for table in self.tables:
+                if not table.active:
+                    continue
+                self._check_ball_net_collision(ball, table)
+
             # Ball-Racket collision
             for racket in self.rackets:
                 self._check_ball_racket_collision(ball, racket)
@@ -643,6 +657,86 @@ class EntityManager:
             # Out of bounds
             if ball.position[1] < -1 or np.linalg.norm(ball.position) > 10:
                 ball.active = False
+
+    def _check_ball_net_collision(self, ball: BallEntity, table: TableEntity):
+        """Check and handle ball-net collision"""
+        # Net is at X=0 (center of table), spans Z direction
+        # Net dimensions
+        net_x = 0.0  # Center of table
+        net_z_half = table.net_length / 2  # 0.915m each side
+        net_bottom = table.height  # Top of table surface
+        net_top = table.height + table.net_height  # 15.25cm above table
+        tape_bottom = net_top - table.net_tape_width  # Where tape starts
+        
+        # Check if ball is near the net plane (X = 0)
+        # Ball crosses net if it was on one side and is now on the other
+        ball_x = ball.position[0]
+        ball_z = ball.position[2]
+        ball_y = ball.position[1]
+        
+        # Check if ball is within net Z range
+        if abs(ball_z) > net_z_half:
+            return
+        
+        # Check if ball is at net height
+        if ball_y - ball.radius > net_top or ball_y + ball.radius < net_bottom:
+            return
+        
+        # Check X collision with net (net is thin, at X=0)
+        net_thickness = 0.005  # 5mm effective thickness
+        if abs(ball_x) > ball.radius + net_thickness:
+            return
+        
+        # Ball is hitting the net!
+        # Determine if hitting tape (top) or mesh (bottom)
+        ball_center_y = ball_y
+        
+        if ball_center_y >= tape_bottom:
+            # Hitting the white tape (top part)
+            restitution = table.net_tape_restitution  # 0.75
+            friction = table.net_tape_friction  # 0.3
+            # Tape can deflect ball over - more elastic
+        else:
+            # Hitting the mesh (bottom part)
+            restitution = table.net_mesh_restitution  # 0.15
+            friction = table.net_mesh_friction  # 0.6
+            # Mesh absorbs energy - ball drops
+        
+        # Collision normal is in X direction (perpendicular to net)
+        if ball.velocity[0] > 0:
+            normal = np.array([-1.0, 0.0, 0.0])  # Ball moving +X, push back -X
+        else:
+            normal = np.array([1.0, 0.0, 0.0])   # Ball moving -X, push back +X
+        
+        # Decompose velocity
+        vel_normal = np.dot(ball.velocity, normal)
+        
+        # Only process if ball is moving into the net
+        if vel_normal >= 0:
+            return
+        
+        vel_normal_vec = vel_normal * normal
+        vel_tangent = ball.velocity - vel_normal_vec
+        
+        # Apply restitution to normal component
+        ball.velocity = -restitution * vel_normal_vec + vel_tangent * (1 - friction * 0.3)
+        
+        # Push ball out of net
+        if ball_x > 0:
+            ball.position[0] = ball.radius + net_thickness
+        else:
+            ball.position[0] = -(ball.radius + net_thickness)
+        
+        # Spin interaction - net can affect spin
+        ball.spin *= (1 - friction * 0.2)
+        
+        # If hitting mesh with low speed, ball might just drop
+        if ball_center_y < tape_bottom:
+            speed = np.linalg.norm(ball.velocity)
+            if speed < 1.0:
+                # Ball gets caught in mesh, just drops
+                ball.velocity[0] *= 0.1
+                ball.velocity[2] *= 0.3
 
     def _check_ball_ball_collisions(self):
         """Check and handle ball-ball collisions"""
