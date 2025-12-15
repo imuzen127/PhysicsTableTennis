@@ -120,7 +120,10 @@ class BallEntity(GameEntity):
 class RacketEntity(GameEntity):
     """Racket entity with swing properties"""
     entity_type: EntityType = EntityType.RACKET
-    acceleration: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    # Acceleration (angle-axis format)
+    accel_angle: float = 0.0
+    accel_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))
+    accel_speed: float = 0.0
     mass: float = 0.18  # 180g typical
     # Rubber for each side (red = forehand, black = backhand typically)
     rubber_red: RubberSideData = field(default_factory=RubberSideData)
@@ -278,12 +281,20 @@ class EntityManager:
             elif isinstance(nbt['velocity'], list):
                 racket.velocity = np.array(nbt['velocity'], dtype=float)
 
-        # Acceleration
+        # Acceleration (angle-axis format)
         if 'acceleration' in nbt:
-            if isinstance(nbt['acceleration'], np.ndarray):
-                racket.acceleration = nbt['acceleration'].copy()
-            elif isinstance(nbt['acceleration'], list):
-                racket.acceleration = np.array(nbt['acceleration'], dtype=float)
+            accel = nbt['acceleration']
+            if isinstance(accel, dict):
+                racket.accel_angle = float(accel.get('angle', 0))
+                axis = accel.get('axis', [0, 1, 0])
+                if isinstance(axis, np.ndarray):
+                    racket.accel_axis = axis.copy()
+                else:
+                    racket.accel_axis = np.array(axis, dtype=float)
+                norm = np.linalg.norm(racket.accel_axis)
+                if norm > 0:
+                    racket.accel_axis = racket.accel_axis / norm
+                racket.accel_speed = float(accel.get('speed', 0))
 
         # Mass
         if 'mass' in nbt:
@@ -494,8 +505,19 @@ class EntityManager:
         """Update racket position during swing"""
         racket.swing_time += dt
 
-        # Apply acceleration to velocity
-        racket.velocity = racket.velocity + racket.acceleration * dt
+        # Apply acceleration (angle-axis format) to velocity
+        if racket.accel_speed != 0:
+            default_dir = np.array([1.0, 0.0, 0.0])
+            if abs(racket.accel_angle) > 1e-6:
+                k = racket.accel_axis
+                v = default_dir
+                cos_a = math.cos(racket.accel_angle)
+                sin_a = math.sin(racket.accel_angle)
+                accel_dir = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
+            else:
+                accel_dir = default_dir
+            accel_vec = accel_dir * racket.accel_speed
+            racket.velocity = racket.velocity + accel_vec * dt
 
         # Update position
         racket.position = racket.position + racket.velocity * dt

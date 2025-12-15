@@ -843,7 +843,7 @@ class GameWorld:
                     return True
                 return False
 
-            # Acceleration (for balls with angle-axis format)
+            # Acceleration (angle-axis format for balls and rackets)
             if path == 'acceleration':
                 if isinstance(value, dict):
                     if hasattr(entity, 'accel_angle'):
