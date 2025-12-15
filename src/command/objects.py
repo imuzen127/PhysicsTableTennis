@@ -590,9 +590,58 @@ class EntityManager:
             for racket in self.rackets:
                 self._check_ball_racket_collision(ball, racket)
 
+        # Ball-Ball collisions (separate loop to avoid modifying list during iteration)
+        self._check_ball_ball_collisions()
+
+        # Out of bounds check
+        for ball in self.balls:
+            if not ball.active:
+                continue
             # Out of bounds
             if ball.position[1] < -1 or np.linalg.norm(ball.position) > 10:
                 ball.active = False
+
+    def _check_ball_ball_collisions(self):
+        """Check and handle ball-ball collisions"""
+        balls = [b for b in self.balls if b.active]
+        n = len(balls)
+        
+        for i in range(n):
+            for j in range(i + 1, n):
+                ball1 = balls[i]
+                ball2 = balls[j]
+                
+                # Vector from ball1 to ball2
+                delta = ball2.position - ball1.position
+                dist = np.linalg.norm(delta)
+                min_dist = ball1.radius + ball2.radius
+                
+                if dist < min_dist and dist > 0:
+                    # Collision detected - elastic collision
+                    normal = delta / dist
+                    
+                    # Relative velocity
+                    rel_vel = ball1.velocity - ball2.velocity
+                    vel_along_normal = np.dot(rel_vel, normal)
+                    
+                    # Only resolve if balls are approaching
+                    if vel_along_normal > 0:
+                        # Coefficient of restitution for ball-ball collision
+                        e = 0.9
+                        
+                        # Impulse magnitude (equal mass assumption)
+                        m1, m2 = ball1.mass, ball2.mass
+                        impulse = (-(1 + e) * vel_along_normal) / (1/m1 + 1/m2)
+                        
+                        # Apply impulse
+                        ball1.velocity = ball1.velocity + (impulse / m1) * normal
+                        ball2.velocity = ball2.velocity - (impulse / m2) * normal
+                        
+                        # Separate balls to prevent overlap
+                        overlap = min_dist - dist
+                        separation = normal * (overlap / 2 + 0.001)
+                        ball1.position = ball1.position - separation
+                        ball2.position = ball2.position + separation
 
     def _check_ball_racket_collision(self, ball: BallEntity, racket: RacketEntity):
         """Check and handle ball-racket collision"""
@@ -664,22 +713,105 @@ class EntityManager:
 
             # Only process if ball is approaching the surface
             if vel_normal < 0:
-                # Reflect velocity
-                ball.velocity = ball.velocity - (1 + restitution) * vel_normal * world_normal
-
-                # Add racket velocity contribution
-                ball.velocity = ball.velocity + racket.velocity * 0.8
-
-                # Apply spin from rubber friction
-                # Tangential velocity
+                # Get rubber type for special handling
+                rubber_type = rubber.rubber_type
+                
+                # Calculate impact strength (for pimple deformation)
+                impact_speed = abs(vel_normal)
+                
+                # Tangential velocity (for spin calculations)
                 vel_tangent = rel_vel - vel_normal * world_normal
-                if np.linalg.norm(vel_tangent) > 0:
-                    # Add spin based on tangential velocity and friction
-                    spin_axis = np.cross(world_normal, vel_tangent)
-                    if np.linalg.norm(spin_axis) > 0:
-                        spin_axis = spin_axis / np.linalg.norm(spin_axis)
-                        spin_magnitude = np.linalg.norm(vel_tangent) * friction * 50  # Spin factor
-                        ball.spin = ball.spin + spin_axis * spin_magnitude
+                tangent_speed = np.linalg.norm(vel_tangent)
+                
+                # === LONG PIMPLES SPECIAL PHYSICS ===
+                if rubber_type == RubberType.LONG_PIMPLES:
+                    # Phase 1: Initial contact - low friction (slipping)
+                    # Phase 2: Pimple buckling - energy absorption
+                    # Phase 3: Pimple wrap - increased friction
+                    # Phase 4: Release - spin reversal/knuckle
+                    
+                    # Simulate pimple tilt angle based on impact
+                    # Higher impact = more pimple deformation
+                    pimple_tilt = min(impact_speed * 30, 80)  # degrees, max 80
+                    tilt_rad = math.radians(pimple_tilt)
+                    
+                    # Effective friction changes with tilt
+                    # Low at start (tip contact), increases as pimple bends
+                    base_friction = rubber.friction  # ~0.2-0.4
+                    effective_friction = base_friction + 0.5 * math.sin(tilt_rad)
+                    
+                    # Non-linear restitution (buckling absorbs energy)
+                    # Buckling threshold around 2-3 m/s impact
+                    buckling_threshold = 2.5
+                    if impact_speed > buckling_threshold:
+                        # Post-buckling: much lower restitution
+                        buckling_factor = min((impact_speed - buckling_threshold) / 3.0, 0.5)
+                        effective_restitution = restitution * (1 - buckling_factor * 0.6)
+                    else:
+                        effective_restitution = restitution
+                    
+                    # Spin reversal effect
+                    # Long pimples preserve/reverse incoming spin rather than adding new spin
+                    spin_reversal = rubber.spin_reversal  # ~0.8
+                    
+                    # Reflect velocity with modified restitution
+                    ball.velocity = ball.velocity - (1 + effective_restitution) * vel_normal * world_normal
+                    ball.velocity = ball.velocity + racket.velocity * 0.7
+                    
+                    # Spin handling: partial reversal instead of friction-based generation
+                    if tangent_speed > 0:
+                        # Incoming spin contribution
+                        incoming_spin_component = np.dot(ball.spin, world_normal)
+                        
+                        # Reverse a portion of the spin
+                        ball.spin = ball.spin * (1 - spin_reversal * 0.5)
+                        
+                        # Add small random variation (pimple irregularity)
+                        random_factor = math.sin(ball.position[0] * 100 + ball.position[2] * 73)
+                        knuckle_variation = np.array([
+                            random_factor * 0.1,
+                            math.cos(ball.position[1] * 50) * 0.05,
+                            math.sin(ball.position[2] * 80) * 0.1
+                        ]) * tangent_speed * 10
+                        ball.spin = ball.spin + knuckle_variation
+                
+                # === SHORT PIMPLES (表ソフト) ===
+                elif rubber_type == RubberType.PIMPLES:
+                    # Less grip than inverted, more direct
+                    # Pimples are short and stiff - less deformation
+                    effective_friction = friction * 0.8
+                    
+                    ball.velocity = ball.velocity - (1 + restitution) * vel_normal * world_normal
+                    ball.velocity = ball.velocity + racket.velocity * 0.85
+                    
+                    if tangent_speed > 0:
+                        spin_axis = np.cross(world_normal, vel_tangent)
+                        if np.linalg.norm(spin_axis) > 0:
+                            spin_axis = spin_axis / np.linalg.norm(spin_axis)
+                            # Less spin generation than inverted
+                            spin_magnitude = tangent_speed * effective_friction * 35
+                            ball.spin = ball.spin * 0.7 + spin_axis * spin_magnitude
+                
+                # === ANTI-SPIN ===
+                elif rubber_type == RubberType.ANTI:
+                    # Very slippery - minimal spin effect
+                    ball.velocity = ball.velocity - (1 + restitution) * vel_normal * world_normal
+                    ball.velocity = ball.velocity + racket.velocity * 0.6
+                    
+                    # Almost no new spin, reduces existing spin
+                    ball.spin = ball.spin * 0.3
+                
+                # === INVERTED (裏ソフト) - Default behavior ===
+                else:
+                    ball.velocity = ball.velocity - (1 + restitution) * vel_normal * world_normal
+                    ball.velocity = ball.velocity + racket.velocity * 0.8
+                    
+                    if tangent_speed > 0:
+                        spin_axis = np.cross(world_normal, vel_tangent)
+                        if np.linalg.norm(spin_axis) > 0:
+                            spin_axis = spin_axis / np.linalg.norm(spin_axis)
+                            spin_magnitude = tangent_speed * friction * 50
+                            ball.spin = ball.spin + spin_axis * spin_magnitude
 
                 # Push ball out of racket
                 penetration = collision_dist - y_dist
