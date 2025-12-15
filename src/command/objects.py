@@ -541,7 +541,7 @@ class EntityManager:
         user_accel = np.zeros(3)
         if ball.accel_speed != 0:
             # Convert angle-axis to direction vector using Rodrigues formula
-            default_dir = np.array([0.0, 0.0, 1.0])  # Default forward
+            default_dir = np.array([1.0, 0.0, 0.0])  # Same as player/velocity default
             if abs(ball.accel_angle) > 1e-6:
                 k = ball.accel_axis
                 v = default_dir
