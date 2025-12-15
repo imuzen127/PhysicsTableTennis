@@ -745,20 +745,55 @@ class GameWorld:
     def _get_entity_nbt(self, entity) -> dict:
         """Get NBT data from entity"""
         from src.command.objects import BallEntity, RacketEntity, TableEntity
+        import math
+
+        # Helper to convert velocity vector to angle-axis format
+        def vel_to_angle_axis(vel):
+            speed = np.linalg.norm(vel)
+            if speed < 1e-6:
+                return "{angle:0.000, axis:[0,1,0], speed:0.000}"
+            direction = vel / speed
+            # Calculate angle from default forward [0,0,1]
+            default = np.array([0.0, 0.0, 1.0])
+            dot = np.clip(np.dot(default, direction), -1.0, 1.0)
+            angle = math.acos(dot)
+            # Calculate axis
+            if abs(angle) < 1e-6 or abs(angle - math.pi) < 1e-6:
+                axis = np.array([0, 1, 0])
+            else:
+                axis = np.cross(default, direction)
+                axis = axis / np.linalg.norm(axis)
+            return f"{{angle:{angle:.3f}, axis:[{axis[0]:.2f},{axis[1]:.2f},{axis[2]:.2f}], speed:{speed:.3f}}}"
+
+        # Helper to convert spin to RPM format
+        def spin_to_rpm(spin):
+            omega = np.linalg.norm(spin)
+            if omega < 1e-6:
+                return "{rpm:0, axis:[0,1,0]}"
+            axis = spin / omega
+            rpm = omega * 60 / (2 * math.pi)
+            return f"{{rpm:{rpm:.0f}, axis:[{axis[0]:.2f},{axis[1]:.2f},{axis[2]:.2f}]}}"
 
         nbt = {
             'id': entity.id,
             'type': entity.entity_type.value,
             'position': f"[{entity.position[0]:.3f}, {entity.position[1]:.3f}, {entity.position[2]:.3f}]",
-            'velocity': f"[{entity.velocity[0]:.3f}, {entity.velocity[1]:.3f}, {entity.velocity[2]:.3f}]",
+            'velocity': vel_to_angle_axis(entity.velocity),
             'active': entity.active
         }
+
+        # Tags (common)
+        if hasattr(entity, 'tags') and entity.tags:
+            nbt['Tags'] = str(entity.tags)
 
         if isinstance(entity, BallEntity):
             nbt['mass'] = f"{entity.mass * 1000:.1f}g"
             nbt['radius'] = f"{entity.radius * 1000:.1f}mm"
-            nbt['spin'] = f"[{entity.spin[0]:.1f}, {entity.spin[1]:.1f}, {entity.spin[2]:.1f}]"
+            nbt['spin'] = spin_to_rpm(entity.spin)
             nbt['rotation'] = f"{{angle:{entity.orientation_angle:.3f}, axis:[{entity.orientation_axis[0]:.2f}, {entity.orientation_axis[1]:.2f}, {entity.orientation_axis[2]:.2f}]}}"
+            # Acceleration
+            if hasattr(entity, 'accel_speed') and entity.accel_speed != 0:
+                nbt['acceleration'] = f"{{angle:{entity.accel_angle:.3f}, axis:[{entity.accel_axis[0]:.2f},{entity.accel_axis[1]:.2f},{entity.accel_axis[2]:.2f}], speed:{entity.accel_speed:.3f}}}"
 
         elif isinstance(entity, RacketEntity):
             nbt['mass'] = f"{entity.mass * 1000:.1f}g"
