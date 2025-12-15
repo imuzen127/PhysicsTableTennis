@@ -782,9 +782,7 @@ class CommandParser:
         # Parse NBT
         nbt = self.nbt_parser.parse(nbt_str)
 
-        # Parse rotation FIRST (needed for velocity direction)
-        rotation_angle = 0.0
-        rotation_axis = np.array([0, 1, 0])
+        # Parse rotation (independent of velocity)
         if 'rotation' in nbt:
             rotation_angle, rotation_axis = RotationParser.parse(nbt['rotation'])
             nbt['rotation'] = {'angle': rotation_angle, 'axis': rotation_axis}
@@ -793,28 +791,18 @@ class CommandParser:
         if 'spin' in nbt:
             nbt['spin'] = SpinParser.parse(nbt['spin'])
 
-        # Parse velocity
+        # Parse velocity (completely independent of rotation)
         # Formats:
-        #   velocity: 0.5  (scalar - use object's rotation direction)
+        #   velocity: 0.5  (scalar - default Z+ direction)
         #   velocity: [vx, vy, vz]  (direct vector)
-        #   velocity: {angle:1.57, axis:[0,1,0], speed:0.5}  (angle-axis + speed)
+        #   velocity: {angle:0, axis:[x,y,z], speed:N}  (axis = direction, angle for fine-tuning)
         #   velocity: {rotation:@s, speed:10}  (player direction + speed)
         if 'velocity' in nbt:
             vel_data = nbt['velocity']
             if isinstance(vel_data, (int, float)):
-                # Scalar velocity: use object's rotation direction
+                # Scalar velocity: use default Z+ direction
                 speed = float(vel_data)
-                default_dir = np.array([0.0, 0.0, 1.0])
-                if abs(rotation_angle) > 1e-6:
-                    # Rodrigues' rotation formula
-                    k = rotation_axis
-                    v = default_dir
-                    cos_a = math.cos(rotation_angle)
-                    sin_a = math.sin(rotation_angle)
-                    direction = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
-                else:
-                    direction = default_dir
-                nbt['velocity'] = direction * speed
+                nbt['velocity'] = np.array([0.0, 0.0, speed])
             elif isinstance(vel_data, list):
                 # Direct vector
                 nbt['velocity'] = np.array(vel_data, dtype=float)
