@@ -427,20 +427,9 @@ class GameWorld:
 
         try:
             # New Minecraft-style commands (case-sensitive for NBT)
-            if command in ['summon', 'execute', 'kill', 'gamemode', 'data', 'function', 'tp', 'rotate', 'tag']:
+            if command in ['summon', 'execute', 'kill', 'gamemode', 'data', 'function', 'tp', 'rotate', 'tag', 'start', 'stop']:
                 result = self.command_parser.parse(cmd_original)
                 self._handle_parsed_command(result)
-                return
-
-            elif command == 'start':
-                self.entity_manager.start()
-                count = len(self.entity_manager.entities)
-                self.add_output(f"Started simulation ({count} entities)")
-                return
-
-            elif command == 'stop':
-                self.entity_manager.stop()
-                self.add_output("Stopped simulation")
                 return
 
             elif command in ['slow', 'slowmo']:
