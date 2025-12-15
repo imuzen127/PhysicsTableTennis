@@ -623,11 +623,21 @@ class CommandParser:
 
         # Handle start command
         if command == 'start' or command.startswith('start '):
-            return {'type': 'start', 'args': {}}
+            selector = None
+            if command.startswith('start '):
+                selector = command[6:].strip()
+                if not selector:
+                    selector = None
+            return {'type': 'start', 'args': {'selector': selector}}
 
         # Handle stop command
         if command == 'stop' or command.startswith('stop '):
-            return {'type': 'stop', 'args': {}}
+            selector = None
+            if command.startswith('stop '):
+                selector = command[5:].strip()
+                if not selector:
+                    selector = None
+            return {'type': 'stop', 'args': {'selector': selector}}
 
         # Handle kill command
         if command.startswith('kill '):

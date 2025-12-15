@@ -524,12 +524,35 @@ class GameWorld:
             self.add_output(f"Killed {count} entities")
 
         elif cmd_type == 'start':
-            self.entity_manager.start()
-            self.add_output("Started simulation")
+            selector = result['args'].get('selector')
+            if selector:
+                # Start specific entities
+                entities = self.command_parser._resolve_selector_multiple(selector)
+                count = 0
+                for entity in entities:
+                    entity.active = True
+                    count += 1
+                self.entity_manager.simulation_running = True
+                self.add_output(f"Started {count} entities")
+            else:
+                # Start all
+                self.entity_manager.start()
+                self.add_output("Started simulation")
 
         elif cmd_type == 'stop':
-            self.entity_manager.stop()
-            self.add_output("Stopped simulation")
+            selector = result['args'].get('selector')
+            if selector:
+                # Stop specific entities
+                entities = self.command_parser._resolve_selector_multiple(selector)
+                count = 0
+                for entity in entities:
+                    entity.active = False
+                    count += 1
+                self.add_output(f"Stopped {count} entities")
+            else:
+                # Stop all
+                self.entity_manager.stop()
+                self.add_output("Stopped simulation")
 
         elif cmd_type == 'gamemode':
             args = result['args']

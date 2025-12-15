@@ -110,6 +110,10 @@ class BallEntity(GameEntity):
     # Orientation (angle-axis representation)
     orientation_angle: float = 0.0  # Rotation angle in radians
     orientation_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))  # Default: Y-up
+    # Acceleration (angle-axis + speed format)
+    accel_angle: float = 0.0  # Direction angle in radians
+    accel_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))
+    accel_speed: float = 0.0  # Acceleration magnitude (m/s^2)
 
 
 @dataclass
@@ -237,6 +241,21 @@ class EntityManager:
             tags = nbt['Tags']
             if isinstance(tags, list):
                 ball.tags = [str(t) for t in tags]
+
+        # Acceleration (angle-axis format: {angle:1.57, axis:[0,1,0], speed:0.1})
+        if 'acceleration' in nbt:
+            accel = nbt['acceleration']
+            if isinstance(accel, dict):
+                ball.accel_angle = float(accel.get('angle', 0))
+                axis = accel.get('axis', [0, 1, 0])
+                if isinstance(axis, np.ndarray):
+                    ball.accel_axis = axis.copy()
+                else:
+                    ball.accel_axis = np.array(axis, dtype=float)
+                norm = np.linalg.norm(ball.accel_axis)
+                if norm > 0:
+                    ball.accel_axis = ball.accel_axis / norm
+                ball.accel_speed = float(accel.get('speed', 0))
 
         return ball
 
@@ -510,8 +529,23 @@ class EntityManager:
         else:
             magnus_accel = np.zeros(3)
 
+        # User-defined acceleration (angle-axis format)
+        user_accel = np.zeros(3)
+        if ball.accel_speed != 0:
+            # Convert angle-axis to direction vector using Rodrigues formula
+            default_dir = np.array([0.0, 0.0, 1.0])  # Default forward
+            if abs(ball.accel_angle) > 1e-6:
+                k = ball.accel_axis
+                v = default_dir
+                cos_a = math.cos(ball.accel_angle)
+                sin_a = math.sin(ball.accel_angle)
+                accel_dir = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
+            else:
+                accel_dir = default_dir
+            user_accel = accel_dir * ball.accel_speed
+
         # Total acceleration
-        accel = gravity + drag_accel + magnus_accel
+        accel = gravity + drag_accel + magnus_accel + user_accel
 
         # Update velocity and position
         ball.velocity = ball.velocity + accel * dt
