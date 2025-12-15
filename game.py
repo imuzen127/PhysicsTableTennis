@@ -129,6 +129,11 @@ class GameWorld:
         # Initialize command parser (needs self reference)
         self.command_parser = CommandParser(self)
 
+        # Scheduled commands for delayed execution
+        # List of (execute_time_ms, command_str)
+        self.scheduled_commands = []
+        self.function_start_time = 0  # Time when function started (ms)
+
         # Spawn default table at origin
         self._spawn_default_table()
 
@@ -628,7 +633,11 @@ class GameWorld:
             self.add_output(f"Unknown command: {result.get('raw', '')}")
 
     def _run_function(self, func_name: str):
-        """Run a function file from the functions folder"""
+        """Run a function file from the functions folder with delay support.
+
+        Delay syntax: 1000;command  (1000ms delay)
+        If delay is omitted, uses the previous delay value (default 0).
+        """
         import os
 
         # Try to find the function file
@@ -648,7 +657,12 @@ class GameWorld:
             with open(func_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
 
+            # Record start time for this function
+            self.function_start_time = pygame.time.get_ticks()
+
             cmd_count = 0
+            current_delay = 0  # Current delay in ms (inherited by subsequent lines)
+
             for line in lines:
                 line = line.strip()
 
@@ -660,14 +674,49 @@ class GameWorld:
                 if line.startswith('/'):
                     line = line[1:]
 
-                # Execute the command
-                self.process_command(line)
+                # Parse delay syntax: "1000;command" or just "command"
+                delay_match = re.match(r'^(\d+);(.+)$', line)
+                if delay_match:
+                    current_delay = int(delay_match.group(1))
+                    command = delay_match.group(2).strip()
+                else:
+                    command = line
+
+                if current_delay == 0:
+                    # Execute immediately
+                    self.process_command(command)
+                else:
+                    # Schedule for later
+                    execute_time = self.function_start_time + current_delay
+                    self.scheduled_commands.append((execute_time, command))
+
                 cmd_count += 1
 
-            self.add_output(f"Executed {func_name} ({cmd_count} commands)")
+            scheduled_count = len([c for c in self.scheduled_commands if c[0] > pygame.time.get_ticks()])
+            if scheduled_count > 0:
+                self.add_output(f"Function {func_name}: {cmd_count} commands ({scheduled_count} scheduled)")
+            else:
+                self.add_output(f"Executed {func_name} ({cmd_count} commands)")
 
         except Exception as e:
             self.add_output(f"Error running function: {e}")
+
+    def _process_scheduled_commands(self):
+        """Process scheduled commands that are ready to execute."""
+        if not self.scheduled_commands:
+            return
+
+        current_time = pygame.time.get_ticks()
+
+        # Find and execute ready commands
+        still_pending = []
+        for execute_time, command in self.scheduled_commands:
+            if current_time >= execute_time:
+                self.process_command(command)
+            else:
+                still_pending.append((execute_time, command))
+
+        self.scheduled_commands = still_pending
 
     def _get_entity_nbt(self, entity) -> dict:
         """Get NBT data from entity"""
@@ -1688,6 +1737,9 @@ class GameWorld:
         while self.running:
             self.handle_events()
             self.handle_movement()
+
+            # Process delayed commands from functions
+            self._process_scheduled_commands()
 
             for _ in range(3):
                 self.update_physics()
