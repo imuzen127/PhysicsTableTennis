@@ -509,7 +509,12 @@ class GameWorld:
 
         elif cmd_type == 'kill':
             selector = result['args']['selector']
-            count = self.entity_manager.kill(selector)
+            # Use parser's selector resolver for full tag/type support
+            entities = self.command_parser._resolve_selector_multiple(selector)
+            count = 0
+            for entity in entities:
+                self.entity_manager._remove_entity(entity)
+                count += 1
             self.add_output(f"Killed {count} entities")
 
         elif cmd_type == 'start':
@@ -578,6 +583,43 @@ class GameWorld:
                 self.add_output(f"Rotated {entity.id}")
             else:
                 self.add_output(f"Entity {entity.id} does not support rotation")
+
+        elif cmd_type == 'tag_add':
+            args = result['args']
+            selector = args['selector']
+            tagname = args['tagname']
+            entities = self.command_parser._resolve_selector_multiple(selector)
+            count = 0
+            for entity in entities:
+                if hasattr(entity, 'tags') and tagname not in entity.tags:
+                    entity.tags.append(tagname)
+                    count += 1
+            self.add_output(f"Added tag '{tagname}' to {count} entities")
+
+        elif cmd_type == 'tag_remove':
+            args = result['args']
+            selector = args['selector']
+            tagname = args['tagname']
+            entities = self.command_parser._resolve_selector_multiple(selector)
+            count = 0
+            for entity in entities:
+                if hasattr(entity, 'tags') and tagname in entity.tags:
+                    entity.tags.remove(tagname)
+                    count += 1
+            self.add_output(f"Removed tag '{tagname}' from {count} entities")
+
+        elif cmd_type == 'tag_list':
+            args = result['args']
+            selector = args['selector']
+            entity = self.command_parser._resolve_selector(selector)
+            if entity and hasattr(entity, 'tags'):
+                tags = entity.tags
+                if tags:
+                    self.add_output(f"Tags: {tags}")
+                else:
+                    self.add_output(f"Tags: []")
+            else:
+                self.add_output("No entity found or entity has no tags")
 
         elif cmd_type == 'error':
             self.add_output(result.get('message', 'Error'))

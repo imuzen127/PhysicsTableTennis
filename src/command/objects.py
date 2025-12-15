@@ -95,6 +95,7 @@ class GameEntity:
     velocity: np.ndarray = field(default_factory=lambda: np.zeros(3))
     rotation: np.ndarray = field(default_factory=lambda: np.zeros(2))  # [yaw, pitch]
     active: bool = False  # Whether simulation is running for this entity
+    tags: List[str] = field(default_factory=list)  # Tags for selector filtering
 
 
 @dataclass
@@ -231,6 +232,12 @@ class EntityManager:
                 if norm > 0:
                     ball.orientation_axis = ball.orientation_axis / norm
 
+        # Tags
+        if 'Tags' in nbt:
+            tags = nbt['Tags']
+            if isinstance(tags, list):
+                ball.tags = [str(t) for t in tags]
+
         return ball
 
     def _create_racket(self, position: np.ndarray, nbt: Dict[str, Any]) -> RacketEntity:
@@ -306,6 +313,12 @@ class EntityManager:
                 if norm > 0:
                     racket.orientation_axis = racket.orientation_axis / norm
 
+        # Tags
+        if 'Tags' in nbt:
+            tags = nbt['Tags']
+            if isinstance(tags, list):
+                racket.tags = [str(t) for t in tags]
+
         return racket
 
     def _create_table(self, position: np.ndarray, nbt: Dict[str, Any]) -> TableEntity:
@@ -344,6 +357,12 @@ class EntityManager:
                 norm = np.linalg.norm(table.orientation_axis)
                 if norm > 0:
                     table.orientation_axis = table.orientation_axis / norm
+
+        # Tags
+        if 'Tags' in nbt:
+            tags = nbt['Tags']
+            if isinstance(tags, list):
+                table.tags = [str(t) for t in tags]
 
         return table
 

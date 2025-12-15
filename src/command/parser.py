@@ -518,22 +518,82 @@ class CommandParser:
 
         return nearest_entity
 
+    def _parse_selector_args(self, args_str: str) -> Dict[str, str]:
+        """Parse selector arguments like type=ball,tag=mytag"""
+        args = {}
+        if not args_str:
+            return args
+        for part in args_str.split(','):
+            if '=' in part:
+                key, value = part.split('=', 1)
+                args[key.strip()] = value.strip()
+        return args
+
+    def _filter_entities_by_args(self, entities: list, args: Dict[str, str]) -> list:
+        """Filter entity list by selector arguments (type, tag)"""
+        result = entities
+        if 'type' in args:
+            target_type = args['type']
+            result = [e for e in result if e.entity_type.value == target_type]
+        if 'tag' in args:
+            target_tag = args['tag']
+            result = [e for e in result if target_tag in getattr(e, 'tags', [])]
+        return result
+
+    def _get_all_entities(self) -> list:
+        """Get all entities (balls, rackets, tables)"""
+        all_entities = []
+        all_entities.extend(self.game.entity_manager.balls)
+        all_entities.extend(self.game.entity_manager.rackets)
+        all_entities.extend(self.game.entity_manager.tables)
+        return all_entities
+
     def _resolve_selector(self, selector: str):
-        """Resolve entity selector (@s, @n[type=...]) to entity or player"""
-        # @s - current entity in execute context, or player if no context
+        """Resolve entity selector (@s, @n[...], @e[...]) to entity or player"""
         if selector == '@s':
             if self.execute_entity is not None:
                 return self.execute_entity
             else:
-                # Return player as a pseudo-entity
                 return self._get_player_entity()
-
-        # @n[type=ball] - nearest ball
-        match = re.match(r'@n\[type=(\w+)\]', selector)
+        match = re.match(r'@([ne])(?:\[(.*?)\])?$', selector)
         if match:
-            return self._get_nearest_entity(match.group(1))
-
+            selector_type = match.group(1)
+            args_str = match.group(2) or ''
+            args = self._parse_selector_args(args_str)
+            all_entities = self._get_all_entities()
+            filtered = self._filter_entities_by_args(all_entities, args)
+            if selector_type == 'n':
+                player_pos = self.get_player_pos_yup()
+                nearest_dist = float('inf')
+                nearest_entity = None
+                for entity in filtered:
+                    dist = np.linalg.norm(entity.position - player_pos)
+                    if dist < nearest_dist:
+                        nearest_dist = dist
+                        nearest_entity = entity
+                return nearest_entity
+            elif selector_type == 'e':
+                return filtered[0] if filtered else None
         return None
+
+    def _resolve_selector_multiple(self, selector: str) -> list:
+        """Resolve selector to multiple entities (for @e)"""
+        if selector == '@s':
+            entity = self._resolve_selector(selector)
+            return [entity] if entity else []
+        match = re.match(r'@([ne])(?:\[(.*?)\])?$', selector)
+        if match:
+            selector_type = match.group(1)
+            args_str = match.group(2) or ''
+            args = self._parse_selector_args(args_str)
+            all_entities = self._get_all_entities()
+            filtered = self._filter_entities_by_args(all_entities, args)
+            if selector_type == 'n':
+                entity = self._resolve_selector(selector)
+                return [entity] if entity else []
+            elif selector_type == 'e':
+                return filtered
+        return []
 
     def _get_player_entity(self):
         """Return player as a pseudo-entity with position and rotation"""
@@ -588,6 +648,10 @@ class CommandParser:
         # Handle tp command
         if command.startswith('tp '):
             return self._parse_tp(command[3:])
+
+        # Handle tag command
+        if command.startswith('tag '):
+            return self._parse_tag(command[4:])
 
         # Handle rotate command
         if command.startswith('rotate '):
@@ -931,6 +995,41 @@ class CommandParser:
                 'axis': axis
             }
         }
+
+    def _parse_tag(self, rest: str) -> Dict[str, Any]:
+        """
+        Parse tag command:
+        - tag <selector> add <tagname>
+        - tag <selector> remove <tagname>
+        - tag <selector> list
+        """
+        parts = rest.strip().split()
+        if len(parts) < 2:
+            return {'type': 'error', 'message': 'Usage: tag <selector> add|remove|list [tagname]'}
+
+        selector = parts[0]
+        action = parts[1]
+
+        if action == 'list':
+            return {
+                'type': 'tag_list',
+                'args': {
+                    'selector': selector
+                }
+            }
+        elif action in ('add', 'remove'):
+            if len(parts) < 3:
+                return {'type': 'error', 'message': f'Usage: tag <selector> {action} <tagname>'}
+            tagname = parts[2]
+            return {
+                'type': f'tag_{action}',
+                'args': {
+                    'selector': selector,
+                    'tagname': tagname
+                }
+            }
+        else:
+            return {'type': 'error', 'message': f'Unknown tag action: {action}'}
 
     def _parse_data_value(self, value_str: str) -> Any:
         """Parse value for data modify command - supports dicts, lists, numbers, strings, selectors"""
