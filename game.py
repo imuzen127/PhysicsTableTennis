@@ -789,6 +789,67 @@ class GameWorld:
                 entity.active = bool(value)
                 return True
 
+            # Velocity (common - supports angle-axis format)
+            if path == 'velocity':
+                if isinstance(value, dict):
+                    # angle-axis format: {angle:1.57, axis:[0,1,0], speed:3.0}
+                    angle = float(value.get('angle', 0))
+                    axis = np.array(value.get('axis', [0, 1, 0]), dtype=float)
+                    norm = np.linalg.norm(axis)
+                    if norm > 0:
+                        axis = axis / norm
+                    speed = float(value.get('speed', 0))
+                    
+                    # Convert to velocity vector using Rodrigues formula
+                    default_dir = np.array([0.0, 0.0, 1.0])
+                    if abs(angle) > 1e-6:
+                        k = axis
+                        v = default_dir
+                        cos_a = np.cos(angle)
+                        sin_a = np.sin(angle)
+                        direction = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
+                    else:
+                        direction = default_dir
+                    entity.velocity = direction * speed
+                    return True
+                elif isinstance(value, list):
+                    entity.velocity = np.array(value, dtype=float)
+                    return True
+                return False
+
+            # Acceleration (for balls with angle-axis format)
+            if path == 'acceleration':
+                if isinstance(value, dict):
+                    if hasattr(entity, 'accel_angle'):
+                        entity.accel_angle = float(value.get('angle', 0))
+                        axis = value.get('axis', [0, 1, 0])
+                        if isinstance(axis, list):
+                            entity.accel_axis = np.array(axis, dtype=float)
+                            norm = np.linalg.norm(entity.accel_axis)
+                            if norm > 0:
+                                entity.accel_axis = entity.accel_axis / norm
+                        entity.accel_speed = float(value.get('speed', 0))
+                        return True
+                return False
+
+            # Spin (for balls)
+            if path == 'spin':
+                if hasattr(entity, 'spin'):
+                    if isinstance(value, dict):
+                        # {rpm:3000, axis:[0,1,0]}
+                        rpm = float(value.get('rpm', 0))
+                        axis = np.array(value.get('axis', [0, 1, 0]), dtype=float)
+                        norm = np.linalg.norm(axis)
+                        if norm > 0:
+                            axis = axis / norm
+                        omega = rpm * 2 * np.pi / 60  # RPM to rad/s
+                        entity.spin = axis * omega
+                        return True
+                    elif isinstance(value, list):
+                        entity.spin = np.array(value, dtype=float)
+                        return True
+                return False
+
             # Rotation (common to ball, racket, table)
             if path == 'rotation':
                 if isinstance(value, dict):
