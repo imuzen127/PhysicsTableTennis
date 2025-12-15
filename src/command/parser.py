@@ -810,29 +810,24 @@ class CommandParser:
                 # Dict format: check for angle-axis or rotation
                 if 'angle' in vel_data and 'axis' in vel_data:
                     # Format: {angle:X, axis:[x,y,z], speed:N}
-                    # axis = direction of movement
-                    # angle = rotation around perpendicular axis (for fine-tuning)
+                    # Rotate default direction [0,0,1] around axis by angle
                     vel_angle = float(vel_data.get('angle', 0))
-                    vel_axis = np.array(vel_data.get('axis', [0, 0, 1]), dtype=float)
+                    vel_axis = np.array(vel_data.get('axis', [0, 1, 0]), dtype=float)
                     norm = np.linalg.norm(vel_axis)
                     if norm > 0:
                         vel_axis = vel_axis / norm
                     speed = float(vel_data.get('speed', 0))
 
-                    # Use axis as the base direction
+                    # Rodrigues rotation: rotate [0,0,1] around axis by angle
+                    default_dir = np.array([0.0, 0.0, 1.0])
                     if abs(vel_angle) > 1e-6:
-                        # Find a perpendicular axis to rotate around
-                        if abs(vel_axis[1]) < 0.9:
-                            perp = np.cross(vel_axis, np.array([0, 1, 0]))
-                        else:
-                            perp = np.cross(vel_axis, np.array([1, 0, 0]))
-                        perp = perp / np.linalg.norm(perp)
-                        # Rodrigues rotation
+                        k = vel_axis
+                        v = default_dir
                         cos_a = math.cos(vel_angle)
                         sin_a = math.sin(vel_angle)
-                        direction = vel_axis * cos_a + np.cross(perp, vel_axis) * sin_a + perp * np.dot(perp, vel_axis) * (1 - cos_a)
+                        direction = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
                     else:
-                        direction = vel_axis
+                        direction = default_dir
                     nbt['velocity'] = direction * speed
                 else:
                     # rotation/@s format: {rotation:@s, speed:10}
