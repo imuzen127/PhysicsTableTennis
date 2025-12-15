@@ -568,23 +568,66 @@ class EntityManager:
             if not ball.active:
                 continue
 
-            # Ground/table collision (Y is height)
+            # Ground collision (Y is height)
             if ball.position[1] < ball.radius:
                 ball.position[1] = ball.radius
-                ball.velocity[1] = -ball.velocity[1] * 0.8
+                # Ground has low restitution and high friction
+                ball.velocity[1] = -ball.velocity[1] * 0.5
+                # Friction slows horizontal velocity on ground
+                ball.velocity[0] *= 0.7
+                ball.velocity[2] *= 0.7
                 ball.bounce_count += 1
 
-            # Table surface collision
-            hl = params.table_length / 2
-            hw = params.table_width / 2
+            # Table surface collision - check against actual table entities
+            for table in self.tables:
+                if not table.active:
+                    continue
 
-            if (abs(ball.position[0]) < hl and
-                abs(ball.position[2]) < hw and
-                ball.position[1] < table_height + ball.radius and
-                ball.velocity[1] < 0):
-                ball.position[1] = table_height + ball.radius
-                ball.velocity[1] = -ball.velocity[1] * 0.85
-                ball.bounce_count += 1
+                hl = table.length / 2
+                hw = table.width / 2
+                th = table.height
+
+                # Check if ball is over the table and hitting from above
+                if (abs(ball.position[0]) < hl and
+                    abs(ball.position[2]) < hw and
+                    ball.position[1] < th + ball.radius and
+                    ball.position[1] > th - 0.05 and  # Not too far below
+                    ball.velocity[1] < 0):
+
+                    ball.position[1] = th + ball.radius
+
+                    # Use table's restitution coefficient
+                    restitution = table.restitution
+                    friction = table.coefficient
+
+                    # Normal collision (Y direction)
+                    ball.velocity[1] = -ball.velocity[1] * restitution
+
+                    # Friction affects horizontal velocity
+                    horizontal_speed = math.sqrt(ball.velocity[0]**2 + ball.velocity[2]**2)
+                    if horizontal_speed > 0.01:
+                        # Friction force reduces horizontal velocity
+                        friction_factor = max(0.85, 1.0 - friction * 0.3)
+                        ball.velocity[0] *= friction_factor
+                        ball.velocity[2] *= friction_factor
+
+                    # Spin-surface interaction
+                    # Top spin increases forward velocity slightly after bounce
+                    # Back spin decreases it
+                    if np.linalg.norm(ball.spin) > 0.1:
+                        # Spin around X axis affects Z velocity (forward/back)
+                        # Spin around Z axis affects X velocity (left/right)
+                        spin_effect_z = ball.spin[0] * ball.radius * friction * 0.3
+                        spin_effect_x = -ball.spin[2] * ball.radius * friction * 0.3
+                        ball.velocity[0] += spin_effect_x
+                        ball.velocity[2] += spin_effect_z
+
+                        # Surface friction reduces spin
+                        spin_reduction = 1.0 - friction * 0.4
+                        ball.spin *= spin_reduction
+
+                    ball.bounce_count += 1
+                    break  # Only collide with one table
 
             # Ball-Racket collision
             for racket in self.rackets:
