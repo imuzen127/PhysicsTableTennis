@@ -615,11 +615,15 @@ class EntityManager:
 
                 hl = table.length / 2
                 hw = table.width / 2
-                th = table.height
+                th = table.height + table.position[1]  # Table surface Y position
+                
+                # Ball position relative to table center
+                rel_x = ball.position[0] - table.position[0]
+                rel_z = ball.position[2] - table.position[2]
 
                 # Check if ball is over the table and hitting from above
-                if (abs(ball.position[0]) < hl and
-                    abs(ball.position[2]) < hw and
+                if (abs(rel_x) < hl and
+                    abs(rel_z) < hw and
                     ball.position[1] < th + ball.radius and
                     ball.position[1] > th - 0.05 and  # Not too far below
                     ball.velocity[1] < 0):
@@ -682,31 +686,30 @@ class EntityManager:
 
     def _check_ball_net_collision(self, ball: BallEntity, table: TableEntity):
         """Check and handle ball-net collision"""
-        # Net is at X=0 (center of table), spans Z direction
-        # Net dimensions
-        net_x = 0.0  # Center of table
+        # Net is at center of table (X direction), spans Z direction
+        # Net dimensions - relative to table position
+        net_x = table.position[0]  # Center of table X
         net_z_half = table.net_length / 2  # 0.915m each side
-        net_bottom = table.height  # Top of table surface
-        net_top = table.height + table.net_height  # 15.25cm above table
+        net_bottom = table.height + table.position[1]  # Top of table surface
+        net_top = net_bottom + table.net_height  # 15.25cm above table
         tape_bottom = net_top - table.net_tape_width  # Where tape starts
         
-        # Check if ball is near the net plane (X = 0)
-        # Ball crosses net if it was on one side and is now on the other
-        ball_x = ball.position[0]
-        ball_z = ball.position[2]
+        # Ball position relative to net
+        ball_rel_x = ball.position[0] - net_x
+        ball_rel_z = ball.position[2] - table.position[2]
         ball_y = ball.position[1]
         
         # Check if ball is within net Z range
-        if abs(ball_z) > net_z_half:
+        if abs(ball_rel_z) > net_z_half:
             return
         
         # Check if ball is at net height
         if ball_y - ball.radius > net_top or ball_y + ball.radius < net_bottom:
             return
         
-        # Check X collision with net (net is thin, at X=0)
+        # Check X collision with net (net is thin, at table center X)
         net_thickness = 0.005  # 5mm effective thickness
-        if abs(ball_x) > ball.radius + net_thickness:
+        if abs(ball_rel_x) > ball.radius + net_thickness:
             return
         
         # Ball is hitting the net!
@@ -744,16 +747,16 @@ class EntityManager:
         ball.velocity = -restitution * vel_normal_vec + vel_tangent * (1 - friction * 0.3)
         
         # Push ball out of net
-        if ball_x > 0:
-            ball.position[0] = ball.radius + net_thickness
+        if ball_rel_x > 0:
+            ball.position[0] = net_x + ball.radius + net_thickness
         else:
-            ball.position[0] = -(ball.radius + net_thickness)
+            ball.position[0] = net_x - (ball.radius + net_thickness)
         
         # Spin interaction - net can affect spin
         ball.spin *= (1 - friction * 0.2)
         
         # If hitting mesh with low speed, ball might just drop
-        if ball_center_y < tape_bottom:
+        if ball_y < tape_bottom:
             speed = np.linalg.norm(ball.velocity)
             if speed < 1.0:
                 # Ball gets caught in mesh, just drops
