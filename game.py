@@ -817,8 +817,8 @@ class GameWorld:
             if path == 'velocity':
                 if isinstance(value, dict):
                     # Format: {angle:X, axis:[x,y,z], speed:N}
-                    # Rotate default direction [0,0,1] around axis by angle
-                    # Then multiply by speed
+                    # Rotate default direction [1,0,0] around axis by angle
+                    # (Same as player rotation default)
                     angle = float(value.get('angle', 0))
                     axis = np.array(value.get('axis', [0, 1, 0]), dtype=float)
                     norm = np.linalg.norm(axis)
@@ -826,8 +826,8 @@ class GameWorld:
                         axis = axis / norm
                     speed = float(value.get('speed', 0))
 
-                    # Rodrigues rotation: rotate [0,0,1] around axis by angle
-                    default_dir = np.array([0.0, 0.0, 1.0])
+                    # Rodrigues rotation: rotate [1,0,0] around axis by angle
+                    default_dir = np.array([1.0, 0.0, 0.0])
                     if abs(angle) > 1e-6:
                         k = axis
                         v = default_dir

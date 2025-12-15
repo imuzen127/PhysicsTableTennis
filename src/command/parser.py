@@ -810,7 +810,8 @@ class CommandParser:
                 # Dict format: check for angle-axis or rotation
                 if 'angle' in vel_data and 'axis' in vel_data:
                     # Format: {angle:X, axis:[x,y,z], speed:N}
-                    # Rotate default direction [0,0,1] around axis by angle
+                    # Rotate default direction [1,0,0] around axis by angle
+                    # (Same as player rotation default)
                     vel_angle = float(vel_data.get('angle', 0))
                     vel_axis = np.array(vel_data.get('axis', [0, 1, 0]), dtype=float)
                     norm = np.linalg.norm(vel_axis)
@@ -818,8 +819,8 @@ class CommandParser:
                         vel_axis = vel_axis / norm
                     speed = float(vel_data.get('speed', 0))
 
-                    # Rodrigues rotation: rotate [0,0,1] around axis by angle
-                    default_dir = np.array([0.0, 0.0, 1.0])
+                    # Rodrigues rotation: rotate [1,0,0] around axis by angle
+                    default_dir = np.array([1.0, 0.0, 0.0])
                     if abs(vel_angle) > 1e-6:
                         k = vel_axis
                         v = default_dir
