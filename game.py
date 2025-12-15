@@ -1430,8 +1430,8 @@ class GameWorld:
             gluDeleteQuadric(quadric)
             glPopMatrix()
             # Pimples pattern (small bumps)
-            self._draw_pimples_pattern(width * 0.85, height * 0.85, thickness,
-                                       pimple_radius=0.004, spacing=0.015, is_red_side=is_red_side)
+            self._draw_pimples_pattern(width * 0.85, height * 0.85, 0.001,
+                                       pimple_radius=0.001, spacing=0.0007, is_red_side=is_red_side)
 
         elif rubber_type == RubberType.LONG_PIMPLES:
             # 粒高: Long pimples (taller, thinner, more flexible look)
@@ -1444,8 +1444,8 @@ class GameWorld:
             gluDeleteQuadric(quadric)
             glPopMatrix()
             # Long pimples (taller, more prominent)
-            self._draw_pimples_pattern(width * 0.85, height * 0.85, thickness * 2,
-                                       pimple_radius=0.003, spacing=0.012, is_red_side=is_red_side,
+            self._draw_pimples_pattern(width * 0.85, height * 0.85, 0.0017,
+                                       pimple_radius=0.0005, spacing=0.0012, is_red_side=is_red_side,
                                        is_long=True)
 
         elif rubber_type == RubberType.ANTI:
@@ -1541,8 +1541,8 @@ class GameWorld:
             gluSphere(quadric, 1.0, 16, 12)
             gluDeleteQuadric(quadric)
             glPopMatrix()
-            self._draw_pimples_pattern_horizontal(width * 0.85, length * 0.85, thickness,
-                                                  pimple_radius=0.004, spacing=0.015,
+            self._draw_pimples_pattern_horizontal(width * 0.85, length * 0.85, 0.001,
+                                                  pimple_radius=0.001, spacing=0.0007,
                                                   is_red_side=is_red_side, facing_up=is_red_side)
 
         elif rubber_type == RubberType.LONG_PIMPLES:
@@ -1554,8 +1554,8 @@ class GameWorld:
             gluSphere(quadric, 1.0, 16, 12)
             gluDeleteQuadric(quadric)
             glPopMatrix()
-            self._draw_pimples_pattern_horizontal(width * 0.85, length * 0.85, thickness * 2,
-                                                  pimple_radius=0.003, spacing=0.012,
+            self._draw_pimples_pattern_horizontal(width * 0.85, length * 0.85, 0.0017,
+                                                  pimple_radius=0.0005, spacing=0.0012,
                                                   is_red_side=is_red_side, facing_up=is_red_side,
                                                   is_long=True)
 

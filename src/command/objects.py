@@ -149,7 +149,7 @@ class TableEntity(GameEntity):
     # Physics properties
     mass: float = 100.0  # kg (heavy, essentially immovable)
     restitution: float = 0.85  # Bounce coefficient
-    coefficient: float = 0.4  # Surface friction coefficient
+    coefficient: float = 0.4  # Surface friction (same as racket's coefficient)
     # Orientation (angle-axis)
     orientation_angle: float = 0.0
     orientation_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))
