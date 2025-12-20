@@ -114,6 +114,9 @@ class BallEntity(GameEntity):
     accel_angle: float = 0.0  # Direction angle in radians
     accel_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))
     accel_speed: float = 0.0  # Acceleration magnitude (m/s^2)
+    # Circular motion (caret notation): [left, up, forward] relative to velocity direction
+    # X=left turn, Y=climb, Z=forward acceleration modifier
+    circular: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 1.0]))
 
 
 @dataclass
@@ -134,6 +137,8 @@ class RacketEntity(GameEntity):
     restitution: List[float] = field(default_factory=lambda: [0.85, 0.85])
     orientation_angle: float = 0.0  # Rotation angle in radians
     orientation_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))  # Rotation axis
+    # Circular motion (caret notation): [left, up, forward] relative to velocity direction
+    circular: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 1.0]))
     # Swing state
     swing_active: bool = False
     swing_time: float = 0.0
@@ -268,6 +273,14 @@ class EntityManager:
                     ball.accel_axis = ball.accel_axis / norm
                 ball.accel_speed = float(accel.get('speed', 0))
 
+        # Circular motion (caret notation: [left, up, forward])
+        if 'circular' in nbt:
+            circ = nbt['circular']
+            if isinstance(circ, list):
+                ball.circular = np.array(circ, dtype=float)
+            elif isinstance(circ, np.ndarray):
+                ball.circular = circ.copy()
+
         return ball
 
     def _create_racket(self, position: np.ndarray, nbt: Dict[str, Any]) -> RacketEntity:
@@ -295,6 +308,14 @@ class EntityManager:
                 if norm > 0:
                     racket.accel_axis = racket.accel_axis / norm
                 racket.accel_speed = float(accel.get('speed', 0))
+
+        # Circular motion (caret notation: [left, up, forward])
+        if 'circular' in nbt:
+            circ = nbt['circular']
+            if isinstance(circ, list):
+                racket.circular = np.array(circ, dtype=float)
+            elif isinstance(circ, np.ndarray):
+                racket.circular = circ.copy()
 
         # Mass
         if 'mass' in nbt:
@@ -517,6 +538,27 @@ class EntityManager:
             else:
                 accel_dir = default_dir
             accel_vec = accel_dir * racket.accel_speed
+            
+            # Circular motion (caret notation): modifies acceleration based on velocity direction
+            if hasattr(racket, 'circular') and np.linalg.norm(racket.velocity) > 1e-6:
+                vel_dir = racket.velocity / np.linalg.norm(racket.velocity)
+                
+                # Build local coordinate system from velocity direction
+                forward = vel_dir
+                world_up = np.array([0.0, 1.0, 0.0])
+                right = np.cross(forward, world_up)
+                if np.linalg.norm(right) < 1e-6:
+                    right = np.array([1.0, 0.0, 0.0])
+                else:
+                    right = right / np.linalg.norm(right)
+                up = np.cross(right, forward)
+                up = up / np.linalg.norm(up)
+                left = -right
+                
+                circ = racket.circular
+                circular_accel = (left * circ[0] + up * circ[1] + forward * circ[2]) * racket.accel_speed
+                accel_vec = accel_vec + circular_accel
+            
             racket.velocity = racket.velocity + accel_vec * dt
 
         # Update position
@@ -574,8 +616,34 @@ class EntityManager:
                 accel_dir = default_dir
             user_accel = accel_dir * ball.accel_speed
 
+        # Circular motion (caret notation): modifies acceleration based on velocity direction
+        # circular = [left, up, forward] relative to velocity
+        circular_accel = np.zeros(3)
+        if hasattr(ball, 'circular') and np.linalg.norm(ball.velocity) > 1e-6:
+            vel_dir = ball.velocity / np.linalg.norm(ball.velocity)
+            
+            # Build local coordinate system from velocity direction
+            # Forward = velocity direction
+            forward = vel_dir
+            
+            # Up = world up, adjusted to be perpendicular to forward
+            world_up = np.array([0.0, 1.0, 0.0])
+            right = np.cross(forward, world_up)
+            if np.linalg.norm(right) < 1e-6:
+                # Velocity is vertical, use world X as reference
+                right = np.array([1.0, 0.0, 0.0])
+            else:
+                right = right / np.linalg.norm(right)
+            up = np.cross(right, forward)
+            up = up / np.linalg.norm(up)
+            left = -right
+            
+            # Apply circular motion: [left, up, forward] * accel_speed
+            circ = ball.circular
+            circular_accel = (left * circ[0] + up * circ[1] + forward * circ[2]) * ball.accel_speed
+
         # Total acceleration
-        accel = gravity + drag_accel + magnus_accel + user_accel
+        accel = gravity + drag_accel + magnus_accel + user_accel + circular_accel
 
         # Update velocity and position
         ball.velocity = ball.velocity + accel * dt

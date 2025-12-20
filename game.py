@@ -783,6 +783,8 @@ class GameWorld:
             # Acceleration
             if hasattr(entity, 'accel_speed') and entity.accel_speed != 0:
                 nbt['acceleration'] = f"{{angle:{entity.accel_angle:.3f}, axis:[{entity.accel_axis[0]:.2f},{entity.accel_axis[1]:.2f},{entity.accel_axis[2]:.2f}], speed:{entity.accel_speed:.3f}}}"
+            if hasattr(entity, 'circular'):
+                nbt['circular'] = f"[{entity.circular[0]:.2f}, {entity.circular[1]:.2f}, {entity.circular[2]:.2f}]"
 
         elif isinstance(entity, RacketEntity):
             nbt['mass'] = f"{entity.mass * 1000:.1f}g"
@@ -790,6 +792,8 @@ class GameWorld:
             nbt['coefficient'] = f"[{entity.coefficient[0]:.2f}, {entity.coefficient[1]:.2f}]"
             nbt['restitution'] = f"[{entity.restitution[0]:.2f}, {entity.restitution[1]:.2f}]"
             nbt['rotation'] = f"{{angle:{entity.orientation_angle:.3f}, axis:[{entity.orientation_axis[0]:.2f}, {entity.orientation_axis[1]:.2f}, {entity.orientation_axis[2]:.2f}]}}"
+            if hasattr(entity, 'circular'):
+                nbt['circular'] = f"[{entity.circular[0]:.2f}, {entity.circular[1]:.2f}, {entity.circular[2]:.2f}]"
 
         elif isinstance(entity, TableEntity):
             nbt['mass'] = f"{entity.mass:.1f}kg"
@@ -855,6 +859,14 @@ class GameWorld:
                             if norm > 0:
                                 entity.accel_axis = entity.accel_axis / norm
                         entity.accel_speed = float(value.get('speed', 0))
+                        return True
+                return False
+
+            # Circular motion (caret notation: [left, up, forward])
+            if path == 'circular':
+                if hasattr(entity, 'circular'):
+                    if isinstance(value, list):
+                        entity.circular = np.array(value, dtype=float)
                         return True
                 return False
 
@@ -1064,7 +1076,10 @@ class GameWorld:
                     elif event.key == K_F1:
                         self.show_help = not self.show_help
                     elif event.key == K_F3:
-                        self.show_debug = not self.show_debug
+                        # F3 alone toggles debug, but check if combo key is pressed
+                        keys = pygame.key.get_pressed()
+                        if not keys[K_b]:
+                            self.show_debug = not self.show_debug
                     elif event.key == K_b:
                         # F3+B: Toggle ball orientation display
                         keys = pygame.key.get_pressed()
