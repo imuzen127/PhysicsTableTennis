@@ -667,6 +667,14 @@ class CommandParser:
         if command.startswith('rotate '):
             return self._parse_rotate(command[7:])
 
+        # Handle play command (enter play mode)
+        if command.startswith('play '):
+            return self._parse_play(command[5:])
+
+        # Handle played command (exit play mode)
+        if command.startswith('played '):
+            return self._parse_played(command[7:])
+
         # Handle other commands
         return {'type': 'unknown', 'raw': command}
 
@@ -1031,6 +1039,73 @@ class CommandParser:
             }
         else:
             return {'type': 'error', 'message': f'Unknown tag action: {action}'}
+
+    def _parse_play(self, rest: str) -> Dict[str, Any]:
+        """
+        Parse play command: play <player_selector> <mode> <racket_selector> <table_selector> <side>
+        Examples:
+            play @s auto @n[type=racket] @n[type=table] 1
+            play @s free @n[type=racket] @n[type=table] 2
+        """
+        parts = rest.strip().split()
+        if len(parts) < 5:
+            return {'type': 'error', 'message': 'Usage: play <player> <auto|free> <racket> <table> <1|2>'}
+
+        player_selector = parts[0]
+        mode = parts[1].lower()
+        racket_selector = parts[2]
+        table_selector = parts[3]
+        side = parts[4]
+
+        # Validate mode
+        if mode not in ('auto', 'free'):
+            return {'type': 'error', 'message': f'Invalid mode: {mode}. Use auto or free.'}
+
+        # Validate side
+        try:
+            side_num = int(side)
+            if side_num not in (1, 2):
+                return {'type': 'error', 'message': 'Side must be 1 or 2.'}
+        except ValueError:
+            return {'type': 'error', 'message': 'Side must be 1 or 2.'}
+
+        # Resolve racket selector
+        racket = self._resolve_selector(racket_selector)
+        if racket is None:
+            return {'type': 'error', 'message': f'No racket found for {racket_selector}'}
+
+        # Resolve table selector
+        table = self._resolve_selector(table_selector)
+        if table is None:
+            return {'type': 'error', 'message': f'No table found for {table_selector}'}
+
+        return {
+            'type': 'play',
+            'args': {
+                'player_selector': player_selector,
+                'mode': mode,
+                'racket': racket,
+                'table': table,
+                'side': side_num
+            }
+        }
+
+    def _parse_played(self, rest: str) -> Dict[str, Any]:
+        """
+        Parse played command: played <player_selector>
+        Examples:
+            played @s
+        """
+        player_selector = rest.strip()
+        if not player_selector:
+            return {'type': 'error', 'message': 'Usage: played <player>'}
+
+        return {
+            'type': 'played',
+            'args': {
+                'player_selector': player_selector
+            }
+        }
 
     def _parse_data_value(self, value_str: str) -> Any:
         """Parse value for data modify command - supports dicts, lists, numbers, strings, selectors"""

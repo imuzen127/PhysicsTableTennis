@@ -33,6 +33,725 @@ from src.command.parser import CommandParser
 from src.command.objects import EntityManager, BallEntity, RacketEntity, TableEntity
 
 
+class PlayMode:
+    """
+    Play mode system for mouse-controlled table tennis gameplay.
+
+    Features:
+    - Auto mode: Match with score, serve rotation, 10-second serve limit
+    - Free mode: Practice mode with manual serve command
+    - Mouse-controlled racket movement
+    - Fixed camera position relative to table
+    - Swing-based spin mechanics
+    """
+
+    # Table side positions (relative to table center)
+    # Side 1: +X direction (one end of table)
+    # Side 2: -X direction (other end of table)
+    SIDE_POSITIONS = {
+        1: {'offset': np.array([1.8, 1.0, 0.0]), 'yaw': 180.0, 'pitch': 20.0},
+        2: {'offset': np.array([-1.8, 1.0, 0.0]), 'yaw': 0.0, 'pitch': 20.0}
+    }
+
+    # Racket height (fixed)
+    RACKET_HEIGHT = 0.85  # Table height + small offset
+
+    def __init__(self, game_world):
+        self.game = game_world
+
+        # Play mode state
+        self.active = False
+        self.mode = None  # 'auto' or 'free'
+        self.racket = None
+        self.table = None
+        self.side = None  # 1 or 2
+
+        # Camera/view state
+        self.fixed_camera_pos = np.array([0.0, 0.0, 0.0])
+        self.fixed_camera_yaw = 0.0
+        self.fixed_camera_pitch = 0.0
+
+        # Mouse control state
+        self.mouse_down = False
+        self.mouse_down_time = 0
+        self.last_mouse_pos = (0, 0)
+        self.swing_start_pos = (0, 0)
+        self.swing_history = []  # Track mouse positions for swing curve analysis
+        self.is_swinging = False
+
+        # Double-click detection for serve toss
+        self.last_click_time = 0
+        self.double_click_threshold = 300  # ms
+
+        # Serve state
+        self.serve_ready = False
+        self.serve_toss_active = False
+        self.serve_ball = None
+
+        # Auto match mode state
+        self.score_player = 0
+        self.score_opponent = 0
+        self.current_server = 1  # 1 or 2 (which side serves)
+        self.serve_count = 0  # Serves in current rotation
+        self.serve_time_start = 0
+        self.serve_timeout = 10000  # 10 seconds in ms
+
+        # Racket position in play area (relative to player's side)
+        self.racket_x = 0.0  # Left-right on table
+        self.racket_z = 0.0  # Forward-backward from edge
+
+        # Racket height adjustment (for lobbing/smash)
+        self.base_racket_height = 0.05  # Base height above table
+        self.auto_height_offset = 0.0  # Auto-adjusted for high balls
+
+    def enter(self, mode: str, racket, table, side: int):
+        """Enter play mode"""
+        self.active = True
+        self.mode = mode
+        self.racket = racket
+        self.table = table
+        self.side = side
+
+        # Calculate fixed camera position
+        side_config = self.SIDE_POSITIONS[side]
+        table_pos = table.position
+        self.fixed_camera_pos = table_pos + side_config['offset']
+        self.fixed_camera_yaw = side_config['yaw']
+        self.fixed_camera_pitch = side_config['pitch']
+
+        # Position racket at player's side
+        self._update_racket_position(0.0, 0.0)
+
+        # Reset scores if auto mode
+        if mode == 'auto':
+            self.score_player = 0
+            self.score_opponent = 0
+            # Random first server
+            import random
+            self.current_server = random.choice([1, 2])
+            self.serve_count = 0
+            self.serve_time_start = pygame.time.get_ticks()
+
+            # Start simulation
+            self.game.entity_manager.start()
+
+        # Reset racket control state
+        self.racket_x = 0.0
+        self.racket_z = 0.0
+        self.swing_history = []
+        self.is_swinging = False
+        self.serve_ready = False
+        self.serve_toss_active = False
+
+    def exit(self):
+        """Exit play mode"""
+        self.active = False
+        self.mode = None
+        self.racket = None
+        self.table = None
+        self.side = None
+
+    def update(self, dt):
+        """Update play mode state"""
+        if not self.active:
+            return
+
+        # Update racket position based on mouse movement
+        if self.is_swinging and self.swing_history:
+            # Apply swing velocity to racket
+            self._apply_swing_motion()
+
+        # Auto-adjust racket height based on incoming ball
+        self._update_auto_height()
+
+        # Check serve timeout in auto mode
+        if self.mode == 'auto' and self.serve_ready:
+            elapsed = pygame.time.get_ticks() - self.serve_time_start
+            if elapsed > self.serve_timeout:
+                # Serve timeout - point to opponent
+                self._serve_timeout()
+
+        # Update serve toss physics
+        if self.serve_toss_active and self.serve_ball:
+            self._update_serve_toss()
+
+    def get_camera_state(self):
+        """Return fixed camera state for play mode"""
+        return (self.fixed_camera_pos.copy(),
+                self.fixed_camera_yaw,
+                self.fixed_camera_pitch)
+
+    def handle_mouse_down(self, button, pos):
+        """Handle mouse button down"""
+        if not self.active:
+            return False
+
+        current_time = pygame.time.get_ticks()
+
+        if button == 1:  # Left button
+            # Check for double-click (serve toss)
+            if current_time - self.last_click_time < self.double_click_threshold:
+                self._start_serve_toss()
+                self.last_click_time = 0  # Reset to prevent triple-click
+                return True
+
+            self.last_click_time = current_time
+
+            # Start tracking for swing
+            self.mouse_down = True
+            self.mouse_down_time = current_time
+            self.swing_start_pos = pos
+            self.last_mouse_pos = pos
+            self.swing_history = [(current_time, pos)]
+            return True
+
+        return False
+
+    def handle_mouse_up(self, button, pos):
+        """Handle mouse button up"""
+        if not self.active:
+            return False
+
+        if button == 1 and self.mouse_down:
+            self.mouse_down = False
+
+            # Calculate swing if there was movement
+            if len(self.swing_history) > 2:
+                self._execute_swing()
+
+            self.swing_history = []
+            self.is_swinging = False
+            return True
+
+        return False
+
+    def handle_mouse_move(self, pos, rel):
+        """Handle mouse movement"""
+        if not self.active:
+            return False
+
+        if self.mouse_down:
+            # Record position for swing curve analysis
+            current_time = pygame.time.get_ticks()
+            self.swing_history.append((current_time, pos))
+
+            # Keep only recent history (last 200ms)
+            cutoff_time = current_time - 200
+            self.swing_history = [(t, p) for t, p in self.swing_history if t >= cutoff_time]
+
+            self.is_swinging = True
+            self.last_mouse_pos = pos
+
+        # Update racket X/Z position based on mouse position
+        self._update_racket_from_mouse(pos)
+        return True
+
+    def _update_racket_from_mouse(self, mouse_pos):
+        """Update racket position based on mouse position on screen"""
+        if not self.table or not self.racket:
+            return
+
+        screen_w = self.game.width
+        screen_h = self.game.height
+
+        # Convert mouse to relative position (-1 to 1)
+        rel_x = (mouse_pos[0] / screen_w - 0.5) * 2.0
+        rel_y = (mouse_pos[1] / screen_h - 0.5) * 2.0
+
+        # Map to play area (roughly half table width and some depth)
+        play_width = self.table.width * 0.8
+        play_depth = 0.6
+
+        self.racket_x = rel_x * play_width / 2
+        self.racket_z = -rel_y * play_depth  # Invert Y for natural feel
+
+        self._update_racket_position(self.racket_x, self.racket_z)
+
+    def _update_racket_position(self, x_offset, z_offset):
+        """Update racket world position"""
+        if not self.table or not self.racket:
+            return
+
+        table_pos = self.table.position
+        table_height = self.table.height
+
+        # Base position at player's edge of table
+        if self.side == 1:
+            base_x = table_pos[0] + self.table.length / 2 + 0.15
+            facing_angle = math.pi  # Face -X direction
+        else:
+            base_x = table_pos[0] - self.table.length / 2 - 0.15
+            facing_angle = 0.0  # Face +X direction
+
+        # Calculate racket position
+        pos = np.array([
+            base_x,
+            table_height + 0.05,  # Fixed height just above table
+            table_pos[2] + x_offset  # Z is left-right from player view
+        ])
+
+        # Apply forward/backward offset based on side
+        if self.side == 1:
+            pos[0] -= z_offset
+        else:
+            pos[0] += z_offset
+
+        self.racket.position = pos
+
+        # Default racket orientation (blade horizontal, facing opponent)
+        self.racket.orientation_angle = facing_angle
+        self.racket.orientation_axis = np.array([0.0, 1.0, 0.0])
+
+    def _apply_swing_motion(self):
+        """Apply continuous swing motion during drag"""
+        if len(self.swing_history) < 2:
+            return
+
+        # Get recent velocity from swing history
+        _, pos1 = self.swing_history[-2]
+        _, pos2 = self.swing_history[-1]
+
+        # Calculate velocity
+        dx = pos2[0] - pos1[0]
+        dy = pos2[1] - pos1[1]
+
+        # Apply to racket velocity (for physics)
+        if self.racket:
+            self.racket.velocity = np.array([dx * 0.01, -dy * 0.01, 0.0])
+
+    def _update_auto_height(self):
+        """Auto-adjust racket height based on incoming ball position"""
+        if not self.table or not self.racket:
+            return
+
+        table_height = self.table.height
+        table_pos = self.table.position
+
+        # Find closest ball approaching player's side
+        closest_ball = None
+        closest_dist = float('inf')
+
+        for ball in self.game.entity_manager.balls:
+            if not ball.active:
+                continue
+
+            # Check if ball is on player's half or approaching
+            ball_x = ball.position[0]
+            vel_x = ball.velocity[0]
+
+            # Side 1 is +X, Side 2 is -X
+            if self.side == 1:
+                # Ball should be moving toward +X or already on +X side
+                is_approaching = vel_x > 0 or ball_x > table_pos[0]
+            else:
+                # Ball should be moving toward -X or already on -X side
+                is_approaching = vel_x < 0 or ball_x < table_pos[0]
+
+            if is_approaching:
+                dist = np.linalg.norm(ball.position - self.racket.position)
+                if dist < closest_dist:
+                    closest_dist = dist
+                    closest_ball = ball
+
+        # Adjust height based on closest ball
+        target_height_offset = 0.0
+
+        if closest_ball and closest_dist < 1.5:  # Ball is nearby
+            ball_height = closest_ball.position[1]
+            height_above_table = ball_height - table_height
+
+            # If ball is high, raise racket
+            if height_above_table > 0.2:  # 20cm above table = high ball
+                # Smooth adjustment up to 0.4m for very high balls
+                target_height_offset = min(0.4, (height_above_table - 0.1) * 0.8)
+
+        # Smooth transition for height adjustment
+        transition_speed = 0.1
+        self.auto_height_offset += (target_height_offset - self.auto_height_offset) * transition_speed
+
+        # Update racket position with new height
+        if self.racket:
+            self.racket.position[1] = self.table.height + self.base_racket_height + self.auto_height_offset
+
+    def _start_serve_toss(self):
+        """Start serve toss (double-click)"""
+        if self.mode == 'auto' and self.current_server != self.side:
+            # Not our serve in auto mode
+            return
+
+        if self.serve_toss_active:
+            return
+
+        # Create ball for serve toss
+        toss_pos = self.racket.position.copy()
+        toss_pos[1] += 0.1  # Start slightly above racket
+
+        # Spawn a ball for the toss
+        nbt = {
+            'velocity': np.array([0.0, 2.5, 0.0]),  # Toss up
+            'spin': np.zeros(3)
+        }
+        self.serve_ball = self.game.entity_manager.summon('ball', toss_pos, nbt)
+        self.serve_ball.active = True
+        self.serve_toss_active = True
+        self.serve_ready = True
+        self.serve_time_start = pygame.time.get_ticks()
+
+        self.game.add_output("Serve toss!")
+
+    def _update_serve_toss(self):
+        """Update serve toss ball physics"""
+        if not self.serve_ball:
+            return
+
+        # Check if ball has fallen back down (ready to hit)
+        if self.serve_ball.position[1] < self.table.height + 0.3:
+            # Ball is low, can be hit during swing
+            pass
+
+        # Check if ball hit the ground (failed toss)
+        if self.serve_ball.position[1] < 0:
+            self._serve_fault()
+
+    def _execute_swing(self):
+        """Execute swing based on mouse movement history"""
+        if len(self.swing_history) < 3:
+            return
+
+        # Analyze swing curve
+        swing_data = self._analyze_swing()
+
+        # Apply swing to racket (update orientation and velocity)
+        self._apply_swing_to_racket(swing_data)
+
+        # Check for ball collision
+        self._check_swing_ball_collision(swing_data)
+
+    def _analyze_swing(self):
+        """Analyze swing curve to determine spin and angle"""
+        if len(self.swing_history) < 2:
+            return {'direction': (0, 0), 'speed': 0, 'curve': 0, 'pull_back': False}
+
+        # Get start and end points
+        _, start_pos = self.swing_history[0]
+        _, end_pos = self.swing_history[-1]
+
+        # Calculate direction and distance
+        dx = end_pos[0] - start_pos[0]
+        dy = end_pos[1] - start_pos[1]
+        distance = math.sqrt(dx * dx + dy * dy)
+
+        # Calculate time for speed
+        start_time = self.swing_history[0][0]
+        end_time = self.swing_history[-1][0]
+        duration = max(1, end_time - start_time) / 1000.0  # seconds
+
+        speed = distance / duration if duration > 0 else 0
+
+        # Analyze curve (for left/right spin)
+        curve = self._calculate_curve()
+
+        # Check for pull-back motion (backspin)
+        pull_back = self._check_pull_back()
+
+        return {
+            'direction': (dx, dy),
+            'speed': speed,
+            'curve': curve,
+            'pull_back': pull_back,
+            'distance': distance
+        }
+
+    def _calculate_curve(self):
+        """Calculate curvature of swing path (positive = clockwise, negative = counter-clockwise)"""
+        if len(self.swing_history) < 5:
+            return 0.0
+
+        # Sample points along the path
+        n = len(self.swing_history)
+        mid_idx = n // 2
+
+        _, start = self.swing_history[0]
+        _, mid = self.swing_history[mid_idx]
+        _, end = self.swing_history[-1]
+
+        # Calculate signed area of triangle (cross product)
+        # Positive = counter-clockwise curve, Negative = clockwise curve
+        ax, ay = mid[0] - start[0], mid[1] - start[1]
+        bx, by = end[0] - start[0], end[1] - start[1]
+
+        cross = ax * by - ay * bx
+
+        # Normalize by distance
+        dist = math.sqrt(bx*bx + by*by)
+        if dist < 1:
+            return 0.0
+
+        return cross / dist
+
+    def _check_pull_back(self):
+        """Check if swing ends with pull-back motion (for backspin)"""
+        if len(self.swing_history) < 4:
+            return False
+
+        # Look at last quarter of swing
+        n = len(self.swing_history)
+        quarter = n // 4
+        if quarter < 2:
+            return False
+
+        # Check if Y increased (pulled toward player) in last part
+        _, early = self.swing_history[-quarter-1]
+        _, late = self.swing_history[-1]
+
+        dy = late[1] - early[1]  # Positive = pulled toward player (down on screen)
+
+        return dy > 20  # Threshold for pull-back detection
+
+    def _apply_swing_to_racket(self, swing_data):
+        """Apply swing analysis to racket orientation"""
+        if not self.racket:
+            return
+
+        direction = swing_data['direction']
+        speed = swing_data['speed']
+        curve = swing_data['curve']
+
+        if speed < 50:  # Too slow for significant angle change
+            return
+
+        # Calculate racket tilt based on swing direction
+        # Swing direction determines which way racket is tilted
+        dx, dy = direction
+        swing_angle = math.atan2(dy, dx)  # Angle of swing
+
+        # Map swing angle to racket tilt
+        # Horizontal swing (dx dominant) -> angle racket left/right
+        # Vertical swing (dy dominant) -> angle racket forward/back
+
+        # Create compound rotation
+        base_angle = self.racket.orientation_angle
+        base_axis = self.racket.orientation_axis.copy()
+
+        # Tilt based on swing direction (simplified)
+        tilt_amount = min(0.5, speed / 1000.0)  # Cap tilt angle
+
+        if abs(dx) > abs(dy):
+            # Horizontal swing - tilt around Z axis
+            tilt_axis = np.array([0.0, 0.0, 1.0])
+            tilt_angle = tilt_amount * np.sign(dx) * (1 if self.side == 1 else -1)
+        else:
+            # Vertical swing - tilt around X axis
+            tilt_axis = np.array([1.0, 0.0, 0.0])
+            tilt_angle = tilt_amount * np.sign(dy)
+
+        # Apply tilt (simplified - just modify existing rotation)
+        self.racket.orientation_angle = base_angle + tilt_angle
+
+    def _check_swing_ball_collision(self, swing_data):
+        """Check if swing hits any balls and apply physics"""
+        if not self.racket:
+            return
+
+        speed = swing_data['speed']
+        if speed < 100:  # Too slow for effective hit
+            return
+
+        # Check for nearby balls
+        for ball in self.game.entity_manager.balls:
+            dist = np.linalg.norm(ball.position - self.racket.position)
+
+            if dist < 0.2:  # Hit range
+                self._apply_hit(ball, swing_data)
+                break
+
+    def _apply_hit(self, ball, swing_data):
+        """Apply hit physics to ball"""
+        direction = swing_data['direction']
+        speed = swing_data['speed']
+        curve = swing_data['curve']
+        pull_back = swing_data['pull_back']
+
+        # Determine ball height relative to table (for lob/smash detection)
+        table_height = self.table.height if self.table else 0.76
+        ball_height_above_table = ball.position[1] - table_height
+        is_high_ball = ball_height_above_table > 0.25  # 25cm above table = high ball
+
+        # Determine hit type based on swing speed and ball height
+        is_lob = speed < 200  # Very slow swing = lob
+        is_smash = is_high_ball and speed > 800  # Fast swing on high ball = smash
+
+        # Base hit velocity
+        if is_lob:
+            # Lob: high, slow arc
+            hit_speed = 3.0  # Slow
+            hit_type = "Lob"
+        elif is_smash:
+            # Smash: fast, downward trajectory
+            hit_speed = min(20.0, speed / 40.0)  # Faster scaling for smash
+            hit_type = "SMASH!"
+        else:
+            # Normal hit
+            hit_speed = min(15.0, speed / 50.0)  # Scale mouse speed to ball speed
+            hit_type = "Hit"
+
+        # Direction based on swing and side
+        dx, dy = direction
+        swing_len = math.sqrt(dx*dx + dy*dy)
+        if swing_len < 1:
+            swing_len = 1
+
+        # Normalize and scale
+        norm_dx = dx / swing_len
+        norm_dy = dy / swing_len
+
+        # Map screen direction to world direction
+        # For side 1: +screen_x -> -world_z, +screen_y -> +world_x
+        # For side 2: +screen_x -> +world_z, +screen_y -> -world_x
+        if self.side == 1:
+            vel_x = -hit_speed * 0.8  # Toward opponent
+            vel_z = -norm_dx * hit_speed * 0.3
+            if is_lob:
+                vel_y = 2.5  # High arc for lob
+            elif is_smash:
+                vel_y = -2.0  # Downward for smash
+            else:
+                vel_y = -norm_dy * hit_speed * 0.2 + 1.0  # Slight upward arc
+        else:
+            vel_x = hit_speed * 0.8
+            vel_z = norm_dx * hit_speed * 0.3
+            if is_lob:
+                vel_y = 2.5  # High arc for lob
+            elif is_smash:
+                vel_y = -2.0  # Downward for smash
+            else:
+                vel_y = -norm_dy * hit_speed * 0.2 + 1.0
+
+        # Apply velocity
+        ball.velocity = np.array([vel_x, vel_y, vel_z])
+
+        # Calculate spin based on swing characteristics
+        spin = np.zeros(3)
+
+        # Curve adds sidespin (left/right rotation)
+        if abs(curve) > 10:
+            # Clockwise curve (negative) = right spin, counter-clockwise = left spin
+            spin[1] = -curve * 50  # Y-axis spin (sidespin)
+
+        # Pull-back adds backspin
+        if pull_back:
+            spin[2] = -3000 * (math.pi / 30)  # Convert to rad/s
+            self.game.add_output("Backspin!")
+        elif is_lob:
+            # Lobs have minimal spin
+            spin[2] = 500 * (math.pi / 30)
+        elif is_smash:
+            # Smash has strong topspin
+            spin[2] = 4000 * (math.pi / 30)
+        else:
+            # Default forward swing adds topspin
+            spin[2] = 2000 * (math.pi / 30)
+
+        ball.spin = spin
+        ball.active = True
+
+        # Clear serve state
+        if self.serve_toss_active:
+            self.serve_toss_active = False
+            self.serve_ready = False
+
+        self.game.add_output(f"{hit_type}! Speed: {hit_speed:.1f}")
+
+    def _serve_timeout(self):
+        """Handle serve timeout in auto mode"""
+        if self.mode != 'auto':
+            return
+
+        # Point to opponent
+        if self.current_server == self.side:
+            self.score_opponent += 1
+            self.game.add_output(f"Serve timeout! Score: {self.score_player}-{self.score_opponent}")
+        else:
+            self.score_player += 1
+            self.game.add_output(f"Opponent serve timeout! Score: {self.score_player}-{self.score_opponent}")
+
+        self._next_serve()
+
+    def _serve_fault(self):
+        """Handle serve fault (ball hit ground)"""
+        if self.serve_ball:
+            self.game.entity_manager._remove_entity(self.serve_ball)
+            self.serve_ball = None
+
+        self.serve_toss_active = False
+        self.serve_ready = False
+
+        if self.mode == 'auto' and self.current_server == self.side:
+            self.score_opponent += 1
+            self.game.add_output(f"Serve fault! Score: {self.score_player}-{self.score_opponent}")
+            self._next_serve()
+
+    def _next_serve(self):
+        """Move to next serve in auto mode"""
+        self.serve_count += 1
+
+        # Rotate serve every 2 points
+        if self.serve_count >= 2:
+            self.serve_count = 0
+            self.current_server = 2 if self.current_server == 1 else 1
+
+        self.serve_time_start = pygame.time.get_ticks()
+        self.serve_ready = False
+
+        if self.current_server == self.side:
+            self.game.add_output("Your serve!")
+        else:
+            self.game.add_output("Opponent's serve")
+
+    def render_ui(self, surface):
+        """Render play mode UI elements"""
+        if not self.active:
+            return
+
+        font = self.game.font_medium
+
+        # Score display for auto mode
+        if self.mode == 'auto':
+            score_text = f"Score: {self.score_player} - {self.score_opponent}"
+            text_surf = font.render(score_text, True, (255, 255, 255))
+            surface.blit(text_surf, (self.game.width // 2 - text_surf.get_width() // 2, 10))
+
+            # Serve indicator
+            if self.current_server == self.side:
+                serve_text = "YOUR SERVE"
+                if self.serve_ready:
+                    elapsed = (pygame.time.get_ticks() - self.serve_time_start) / 1000.0
+                    remaining = 10.0 - elapsed
+                    serve_text = f"SERVE NOW! {remaining:.1f}s"
+                text_surf = font.render(serve_text, True, (255, 255, 100))
+            else:
+                serve_text = "Opponent's serve"
+                text_surf = font.render(serve_text, True, (180, 180, 180))
+            surface.blit(text_surf, (self.game.width // 2 - text_surf.get_width() // 2, 45))
+
+        # Mode indicator
+        mode_text = f"[{self.mode.upper()} MODE] Side {self.side}"
+        text_surf = self.game.font_small.render(mode_text, True, (150, 200, 255))
+        surface.blit(text_surf, (10, 10))
+
+        # Instructions
+        instructions = [
+            "Double-click: Serve toss",
+            "Hold + drag: Swing",
+            "ESC or /played @s: Exit"
+        ]
+        y = 35
+        for line in instructions:
+            text_surf = self.game.font_small.render(line, True, (180, 180, 180))
+            surface.blit(text_surf, (10, y))
+            y += 18
+
+
 class GameWorld:
     """The 3D game world with real-time physics"""
 
@@ -137,6 +856,9 @@ class GameWorld:
 
         # Spawn default table at origin
         self._spawn_default_table()
+
+        # Play mode system
+        self.play_mode = PlayMode(self)
 
     def _init_gl(self):
         """Initialize OpenGL"""
@@ -338,6 +1060,14 @@ class GameWorld:
         if self.console_open or self.menu_open or self.data_popup_open:
             return
 
+        # In play mode, camera is fixed
+        if self.play_mode.active:
+            cam_pos, cam_yaw, cam_pitch = self.play_mode.get_camera_state()
+            self.camera_pos = cam_pos
+            self.camera_yaw = cam_yaw
+            self.camera_pitch = cam_pitch
+            return
+
         keys = pygame.key.get_pressed()
 
         yaw_rad = math.radians(self.camera_yaw)
@@ -427,7 +1157,7 @@ class GameWorld:
 
         try:
             # New Minecraft-style commands (case-sensitive for NBT)
-            if command in ['summon', 'execute', 'kill', 'gamemode', 'data', 'function', 'tp', 'rotate', 'tag', 'start', 'stop']:
+            if command in ['summon', 'execute', 'kill', 'gamemode', 'data', 'function', 'tp', 'rotate', 'tag', 'start', 'stop', 'play', 'played']:
                 result = self.command_parser.parse(cmd_original)
                 self._handle_parsed_command(result)
                 return
@@ -638,6 +1368,39 @@ class GameWorld:
                     self.add_output(f"Tags: []")
             else:
                 self.add_output("No entity found or entity has no tags")
+
+        elif cmd_type == 'play':
+            args = result['args']
+            mode = args['mode']
+            racket = args['racket']
+            table = args['table']
+            side = args['side']
+
+            # Enter play mode
+            self.play_mode.enter(mode, racket, table, side)
+
+            # Set camera to fixed position
+            cam_pos, cam_yaw, cam_pitch = self.play_mode.get_camera_state()
+            self.camera_pos = cam_pos
+            self.camera_yaw = cam_yaw
+            self.camera_pitch = cam_pitch
+
+            # Show mouse cursor for play mode
+            pygame.mouse.set_visible(True)
+            pygame.event.set_grab(False)
+
+            self.add_output(f"Play mode: {mode}, Side {side}")
+
+        elif cmd_type == 'played':
+            # Exit play mode
+            if self.play_mode.active:
+                self.play_mode.exit()
+                # Restore FPS camera controls
+                pygame.mouse.set_visible(False)
+                pygame.event.set_grab(True)
+                self.add_output("Exited play mode")
+            else:
+                self.add_output("Not in play mode")
 
         elif cmd_type == 'error':
             self.add_output(result.get('message', 'Error'))
@@ -1063,6 +1826,23 @@ class GameWorld:
                         pygame.mouse.set_visible(False)
                         pygame.event.set_grab(True)
 
+                elif self.play_mode.active:
+                    # Play mode key handling
+                    if event.key == K_SLASH:
+                        self.console_open = True
+                        self.history_index = -1
+                        self.console_cursor = 0
+                    elif event.key == K_ESCAPE:
+                        # Exit play mode
+                        self.play_mode.exit()
+                        pygame.mouse.set_visible(False)
+                        pygame.event.set_grab(True)
+                        self.add_output("Exited play mode")
+                    elif event.key == K_F1:
+                        self.show_help = not self.show_help
+                    elif event.key == K_F3:
+                        self.show_debug = not self.show_debug
+
                 else:
                     # Normal game mode
                     if event.key == K_SLASH:
@@ -1107,6 +1887,9 @@ class GameWorld:
                             pygame.event.set_grab(True)
                         elif 420 <= my <= 470:  # Quit
                             self.running = False
+                elif self.play_mode.active:
+                    # Play mode mouse handling
+                    self.play_mode.handle_mouse_down(event.button, event.pos)
                 else:
                     # Debug: show button number for non-standard buttons
                     if event.button not in [1, 2, 3]:
@@ -1127,10 +1910,17 @@ class GameWorld:
                         self.add_output(f"Speed: {self.camera_speed:.2f}")
 
             elif event.type == MOUSEBUTTONUP:
-                if event.button == 7:
+                if self.play_mode.active:
+                    self.play_mode.handle_mouse_up(event.button, event.pos)
+                elif event.button == 7:
                     self.mouse_side1_held = False
                 elif event.button == 6:
                     self.mouse_side2_held = False
+
+            elif event.type == MOUSEMOTION:
+                # Handle mouse motion for play mode
+                if self.play_mode.active and not self.console_open and not self.menu_open:
+                    self.play_mode.handle_mouse_move(event.pos, event.rel)
 
             elif event.type == VIDEORESIZE:
                 # Handle window resize
@@ -1388,6 +2178,10 @@ class GameWorld:
             pygame.draw.rect(hud, btn_color, (close_btn_x, close_btn_y, close_btn_w, close_btn_h), border_radius=5)
             close_text = self.font_small.render("Close [ESC]", True, (255, 255, 255))
             hud.blit(close_text, (close_btn_x + (close_btn_w - close_text.get_width()) // 2, close_btn_y + 6))
+
+        # Play mode UI
+        if self.play_mode.active:
+            self.play_mode.render_ui(hud)
 
         return hud
 
@@ -1866,6 +2660,10 @@ class GameWorld:
 
             # Process delayed commands from functions
             self._process_scheduled_commands()
+
+            # Update play mode state
+            if self.play_mode.active:
+                self.play_mode.update(self.params.dt * self.time_scale)
 
             for _ in range(3):
                 self.update_physics()
