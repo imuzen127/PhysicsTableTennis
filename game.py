@@ -46,11 +46,19 @@ class PlayMode:
     """
 
     # Table side positions (relative to table center)
-    # Side 1: +X direction (one end of table)
-    # Side 2: -X direction (other end of table)
+    # Based on user investigation for stable viewing positions
+    # Side 1: -X direction (player at -X end, facing +X toward opponent)
+    # Side 2: +X direction (player at +X end, facing -X toward opponent)
     SIDE_POSITIONS = {
-        1: {'offset': np.array([1.8, 1.0, 0.0]), 'yaw': 180.0, 'pitch': 20.0},
-        2: {'offset': np.array([-1.8, 1.0, 0.0]), 'yaw': 0.0, 'pitch': 20.0}
+        1: {'offset': np.array([-2.084, 1.42, -0.001]), 'yaw': 0.0, 'pitch': -27.0},
+        2: {'offset': np.array([2.084, 1.42, 0.001]), 'yaw': 180.0, 'pitch': -27.0}
+    }
+
+    # Racket base rotation for each side (to face opponent)
+    # rotation makes red face point toward opponent
+    RACKET_ROTATIONS = {
+        1: {'angle': 1.570, 'axis': np.array([0.0, 0.0, -1.0])},  # Face +X
+        2: {'angle': 1.570, 'axis': np.array([0.0, 0.0, 1.0])}    # Face -X
     }
 
     # Racket height (fixed)
@@ -71,13 +79,19 @@ class PlayMode:
         self.fixed_camera_yaw = 0.0
         self.fixed_camera_pitch = 0.0
 
-        # Mouse control state
+        # Mouse control state (left button - move and swing)
         self.mouse_down = False
         self.mouse_down_time = 0
         self.last_mouse_pos = (0, 0)
         self.swing_start_pos = (0, 0)
         self.swing_history = []  # Track mouse positions for swing curve analysis
         self.is_swinging = False
+
+        # Right mouse button state (spin control)
+        self.right_mouse_down = False
+        self.right_mouse_start_pos = (0, 0)
+        self.right_mouse_last_pos = (0, 0)
+        self.spin_angle_offset = 0.0  # Offset to base rotation angle for spin
 
         # Double-click detection for serve toss
         self.last_click_time = 0
@@ -101,7 +115,7 @@ class PlayMode:
         self.racket_z = 0.0  # Forward-backward from edge
 
         # Racket height adjustment (for lobbing/smash)
-        self.base_racket_height = 0.05  # Base height above table
+        self.base_racket_height = 0.18  # Base height above table
         self.auto_height_offset = 0.0  # Auto-adjusted for high balls
 
     def enter(self, mode: str, racket, table, side: int):
@@ -122,6 +136,12 @@ class PlayMode:
         # Position racket at player's side
         self._update_racket_position(0.0, 0.0)
 
+        # Set racket to manual control (position controlled by mouse, not physics)
+        self.racket.manual_control = True
+
+        # Start simulation (for both free and auto mode)
+        self.game.entity_manager.start()
+
         # Reset scores if auto mode
         if mode == 'auto':
             self.score_player = 0
@@ -132,9 +152,6 @@ class PlayMode:
             self.serve_count = 0
             self.serve_time_start = pygame.time.get_ticks()
 
-            # Start simulation
-            self.game.entity_manager.start()
-
         # Reset racket control state
         self.racket_x = 0.0
         self.racket_z = 0.0
@@ -142,6 +159,7 @@ class PlayMode:
         self.is_swinging = False
         self.serve_ready = False
         self.serve_toss_active = False
+        self.spin_angle_offset = 0.0  # Reset spin angle offset
 
     def exit(self):
         """Exit play mode"""
@@ -161,7 +179,7 @@ class PlayMode:
             # Apply swing velocity to racket
             self._apply_swing_motion()
 
-        # Auto-adjust racket height based on incoming ball
+        # Auto height adjustment - match ball Y position
         self._update_auto_height()
 
         # Check serve timeout in auto mode
@@ -188,7 +206,7 @@ class PlayMode:
 
         current_time = pygame.time.get_ticks()
 
-        if button == 1:  # Left button
+        if button == 1:  # Left button - move racket and swing
             # Check for double-click (serve toss)
             if current_time - self.last_click_time < self.double_click_threshold:
                 self._start_serve_toss()
@@ -202,7 +220,14 @@ class PlayMode:
             self.mouse_down_time = current_time
             self.swing_start_pos = pos
             self.last_mouse_pos = pos
+            self.drag_last_mouse_pos = pos  # Initialize for delta tracking
             self.swing_history = [(current_time, pos)]
+            return True
+
+        elif button == 3:  # Right button - spin control
+            self.right_mouse_down = True
+            self.right_mouse_start_pos = pos
+            self.right_mouse_last_pos = pos
             return True
 
         return False
@@ -219,8 +244,18 @@ class PlayMode:
             if len(self.swing_history) > 2:
                 self._execute_swing()
 
+            # Stop racket movement (but keep angle)
+            if self.racket:
+                self.racket.velocity = np.zeros(3)
+                # rotation2 is NOT reset - keep the swing angle
+
             self.swing_history = []
             self.is_swinging = False
+            self.drag_last_mouse_pos = None  # Reset for next drag
+            return True
+
+        elif button == 3 and getattr(self, 'right_mouse_down', False):
+            self.right_mouse_down = False
             return True
 
         return False
@@ -231,7 +266,7 @@ class PlayMode:
             return False
 
         if self.mouse_down:
-            # Record position for swing curve analysis
+            # Left button held - move racket and record swing
             current_time = pygame.time.get_ticks()
             self.swing_history.append((current_time, pos))
 
@@ -242,33 +277,107 @@ class PlayMode:
             self.is_swinging = True
             self.last_mouse_pos = pos
 
-        # Update racket X/Z position based on mouse position
-        self._update_racket_from_mouse(pos)
+            # Update racket position only when left button is held
+            self._update_racket_from_mouse(pos)
+
+        if getattr(self, 'right_mouse_down', False):
+            # Right button held - adjust spin (rotation angle)
+            dy = pos[1] - getattr(self, 'right_mouse_last_pos', pos)[1]
+            self._adjust_spin_angle(dy)
+            self.right_mouse_last_pos = pos
+
         return True
 
     def _update_racket_from_mouse(self, mouse_pos):
-        """Update racket position based on mouse position on screen"""
+        """Update racket position based on mouse movement (delta)
+
+        Moves racket by the amount the mouse moved, not absolute position.
+        """
         if not self.table or not self.racket:
             return
 
-        screen_w = self.game.width
-        screen_h = self.game.height
+        # Get last position for delta calculation
+        last_pos = getattr(self, 'drag_last_mouse_pos', None)
+        if last_pos is None:
+            # First frame of drag - just store position, don't move
+            self.drag_last_mouse_pos = mouse_pos
+            return
 
-        # Convert mouse to relative position (-1 to 1)
-        rel_x = (mouse_pos[0] / screen_w - 0.5) * 2.0
-        rel_y = (mouse_pos[1] / screen_h - 0.5) * 2.0
+        # Calculate mouse delta
+        dx = mouse_pos[0] - last_pos[0]
+        dy = mouse_pos[1] - last_pos[1]
+        self.drag_last_mouse_pos = mouse_pos
 
-        # Map to play area (roughly half table width and some depth)
-        play_width = self.table.width * 0.8
-        play_depth = 0.6
+        # Sensitivity for mouse-to-world movement
+        sensitivity = 0.003  # Adjust as needed
 
-        self.racket_x = rel_x * play_width / 2
-        self.racket_z = -rel_y * play_depth  # Invert Y for natural feel
+        table_pos = self.table.position
+        net_x = table_pos[0]
 
-        self._update_racket_position(self.racket_x, self.racket_z)
+        # Current racket position
+        current_pos = self.racket.position.copy()
+
+        # Mouse X movement -> World Z (left-right from player view)
+        current_pos[2] += dx * sensitivity
+
+        # Mouse Y movement -> World X (forward-back)
+        if self.side == 1:
+            # Side 1: mouse down = back (-X), mouse up = forward (+X)
+            current_pos[0] -= dy * sensitivity
+            # Only prevent net crossing (no backward limit)
+            max_x = net_x - 0.05
+            current_pos[0] = min(max_x, current_pos[0])
+        else:
+            # Side 2: mouse down = back (+X), mouse up = forward (-X)
+            current_pos[0] += dy * sensitivity
+            # Only prevent net crossing (no backward limit)
+            min_x = net_x + 0.05
+            current_pos[0] = max(min_x, current_pos[0])
+
+        # Clamp Z to table width
+        half_width = self.table.width / 2 + 0.3
+        current_pos[2] = max(table_pos[2] - half_width, min(table_pos[2] + half_width, current_pos[2]))
+
+        # Calculate velocity from position change (for collision response)
+        old_pos = self.racket.position.copy()
+        position_delta = current_pos - old_pos
+        # Estimate velocity based on ~60fps (0.016s per frame)
+        vel_scale = 60.0  # Convert position delta to velocity
+        self.racket.velocity = position_delta * vel_scale
+
+        # Save previous position for swept collision detection
+        self.racket.prev_position = old_pos
+        self.racket.position = current_pos
+
+        # Apply base rotation (but don't touch rotation2 - that's for swing)
+        self._apply_base_rotation_only()
+
+    def _apply_base_rotation_only(self):
+        """Apply only base rotation (rotation) without touching rotation2"""
+        if not self.racket or not self.side:
+            return
+
+        rot_config = self.RACKET_ROTATIONS[self.side]
+        self.racket.orientation_angle = rot_config['angle'] + self.spin_angle_offset
+        self.racket.orientation_axis = rot_config['axis'].copy()
+        # DO NOT modify rotation2 here - it's controlled by swing
+
+    def _apply_racket_orientation(self):
+        """Apply full racket orientation (both rotation and rotation2 init)"""
+        if not self.racket or not self.side:
+            return
+
+        rot_config = self.RACKET_ROTATIONS[self.side]
+        self.racket.orientation_angle = rot_config['angle'] + self.spin_angle_offset
+        self.racket.orientation_axis = rot_config['axis'].copy()
+
+        # Initialize rotation2 only if not already set
+        if not hasattr(self.racket, 'orientation_angle2'):
+            self.racket.orientation_angle2 = 0.0
+            self.racket.orientation_axis2 = np.array([0.0, 1.0, 0.0])
 
     def _update_racket_position(self, x_offset, z_offset):
-        """Update racket world position"""
+        """Update racket world position (used for initial positioning)"""
         if not self.table or not self.racket:
             return
 
@@ -276,58 +385,105 @@ class PlayMode:
         table_height = self.table.height
 
         # Base position at player's edge of table
+        # Side 1: player at -X end, facing +X
+        # Side 2: player at +X end, facing -X
         if self.side == 1:
-            base_x = table_pos[0] + self.table.length / 2 + 0.15
-            facing_angle = math.pi  # Face -X direction
-        else:
             base_x = table_pos[0] - self.table.length / 2 - 0.15
-            facing_angle = 0.0  # Face +X direction
+        else:
+            base_x = table_pos[0] + self.table.length / 2 + 0.15
 
         # Calculate racket position
         pos = np.array([
             base_x,
-            table_height + 0.05,  # Fixed height just above table
+            table_pos[1] + table_height + 0.25,  # 25cm above table surface
             table_pos[2] + x_offset  # Z is left-right from player view
         ])
 
         # Apply forward/backward offset based on side
         if self.side == 1:
-            pos[0] -= z_offset
+            pos[0] += z_offset  # Forward is +X for side 1
         else:
-            pos[0] += z_offset
+            pos[0] -= z_offset  # Forward is -X for side 2
 
+        # Save previous position for swept collision detection
+        self.racket.prev_position = self.racket.position.copy()
         self.racket.position = pos
+        self._apply_racket_orientation()
 
-        # Default racket orientation (blade horizontal, facing opponent)
-        self.racket.orientation_angle = facing_angle
-        self.racket.orientation_axis = np.array([0.0, 1.0, 0.0])
+    def _adjust_spin_angle(self, dy):
+        """Adjust spin angle based on right-click drag
+
+        dy > 0 (drag down/toward player) -> decrease angle -> backspin
+        dy < 0 (drag up/away from player) -> increase angle -> topspin
+        """
+        if not self.racket:
+            return
+
+        # Sensitivity for spin adjustment - increased for faster response
+        sensitivity = 0.008
+        max_offset = 1.57  # Max ~90 degrees adjustment (full range: up to down)
+
+        # Drag down (positive dy) = backspin = decrease angle
+        # Drag up (negative dy) = topspin = increase angle
+        self.spin_angle_offset -= dy * sensitivity
+        self.spin_angle_offset = max(-max_offset, min(max_offset, self.spin_angle_offset))
+
+        # Update base rotation only (don't touch rotation2)
+        self._apply_base_rotation_only()
 
     def _apply_swing_motion(self):
-        """Apply continuous swing motion during drag"""
+        """Apply continuous swing motion during drag - adjusts rotation2 based on swing direction"""
         if len(self.swing_history) < 2:
             return
 
-        # Get recent velocity from swing history
+        # Get recent movement from swing history
         _, pos1 = self.swing_history[-2]
         _, pos2 = self.swing_history[-1]
 
-        # Calculate velocity
-        dx = pos2[0] - pos1[0]
-        dy = pos2[1] - pos1[1]
+        # Calculate movement delta
+        dx = pos2[0] - pos1[0]  # Horizontal movement (left-right)
+        dy = pos2[1] - pos1[1]  # Vertical movement (up-down)
 
-        # Apply to racket velocity (for physics)
-        if self.racket:
-            self.racket.velocity = np.array([dx * 0.01, -dy * 0.01, 0.0])
+        if not self.racket:
+            return
+
+        speed = math.sqrt(dx * dx + dy * dy)
+
+        # Apply rotation2 based on swing direction (only for fast swings)
+        if speed > 2.0:  # Higher threshold - slow swings don't change angle
+            # Calculate tilt amount - more sensitive to horizontal movement
+            # Max tilt ~45 degrees (0.785 rad) for fast swings
+            max_tilt = 0.785
+            tilt_amount = min(max_tilt, speed * 0.05)  # Increased sensitivity
+
+            # Horizontal swing determines left/right angle
+            horizontal_factor = dx / speed  # -1 to 1
+
+            # Apply rotation2 around local Y-axis
+            self.racket.orientation_angle2 = tilt_amount * horizontal_factor
+            self.racket.orientation_axis2 = np.array([0.0, 1.0, 0.0])
+
+            # Apply velocity based on side for physics
+            vel_scale = 0.02
+            if self.side == 1:
+                self.racket.velocity = np.array([dy * vel_scale, 0.0, dx * vel_scale])
+            else:
+                self.racket.velocity = np.array([-dy * vel_scale, 0.0, -dx * vel_scale])
 
     def _update_auto_height(self):
-        """Auto-adjust racket height based on incoming ball position"""
+        """Auto-adjust racket Y to match ball Y position (only for approaching balls)"""
         if not self.table or not self.racket:
             return
 
-        table_height = self.table.height
-        table_pos = self.table.position
+        # Check if any ball was recently hit - if so, pause auto height
+        physics_time = getattr(self.game.entity_manager, '_physics_time', 0)
+        hit_pause_duration = 0.5  # 500ms pause after hitting
+        for ball in self.game.entity_manager.balls:
+            last_hit = getattr(ball, 'last_racket_hit_time', -1)
+            if last_hit > 0 and physics_time - last_hit < hit_pause_duration:
+                return  # Don't adjust height right after hitting
 
-        # Find closest ball approaching player's side
+        # Find closest active ball that is APPROACHING (not moving away after hit)
         closest_ball = None
         closest_dist = float('inf')
 
@@ -335,64 +491,67 @@ class PlayMode:
             if not ball.active:
                 continue
 
-            # Check if ball is on player's half or approaching
-            ball_x = ball.position[0]
-            vel_x = ball.velocity[0]
-
-            # Side 1 is +X, Side 2 is -X
+            # Skip balls that are clearly moving AWAY (just hit by player)
+            ball_vel_x = ball.velocity[0]
+            speed_threshold = 1.0  # m/s - if moving away faster than this, skip
             if self.side == 1:
-                # Ball should be moving toward +X or already on +X side
-                is_approaching = vel_x > 0 or ball_x > table_pos[0]
+                # Side 1 at -X: ball moving away if going toward +X fast
+                is_moving_away = ball_vel_x > speed_threshold
             else:
-                # Ball should be moving toward -X or already on -X side
-                is_approaching = vel_x < 0 or ball_x < table_pos[0]
+                # Side 2 at +X: ball moving away if going toward -X fast
+                is_moving_away = ball_vel_x < -speed_threshold
 
-            if is_approaching:
-                dist = np.linalg.norm(ball.position - self.racket.position)
-                if dist < closest_dist:
-                    closest_dist = dist
-                    closest_ball = ball
+            if is_moving_away:
+                continue  # Skip balls moving away fast (just hit)
 
-        # Adjust height based on closest ball
-        target_height_offset = 0.0
+            dist = np.linalg.norm(ball.position - self.racket.position)
+            if dist < closest_dist:
+                closest_dist = dist
+                closest_ball = ball
 
-        if closest_ball and closest_dist < 1.5:  # Ball is nearby
-            ball_height = closest_ball.position[1]
-            height_above_table = ball_height - table_height
+        # Match racket Y to ball Y
+        if closest_ball and closest_dist < 2.0:  # Ball is within range
+            target_y = closest_ball.position[1]
 
-            # If ball is high, raise racket
-            if height_above_table > 0.2:  # 20cm above table = high ball
-                # Smooth adjustment up to 0.4m for very high balls
-                target_height_offset = min(0.4, (height_above_table - 0.1) * 0.8)
+            # Smooth transition
+            current_y = self.racket.position[1]
+            smooth_speed = 0.2  # Slower tracking
+            new_y = current_y + (target_y - current_y) * smooth_speed
 
-        # Smooth transition for height adjustment
-        transition_speed = 0.1
-        self.auto_height_offset += (target_height_offset - self.auto_height_offset) * transition_speed
-
-        # Update racket position with new height
-        if self.racket:
-            self.racket.position[1] = self.table.height + self.base_racket_height + self.auto_height_offset
+            # Clamp to reasonable range (above table surface)
+            min_y = self.table.height + 0.05
+            max_y = self.table.height + 1.0
+            self.racket.position[1] = max(min_y, min(max_y, new_y))
 
     def _start_serve_toss(self):
-        """Start serve toss (double-click)"""
-        if self.mode == 'auto' and self.current_server != self.side:
-            # Not our serve in auto mode
-            return
+        """Start serve toss (double-click) - works in both free and auto mode"""
+        # Delete existing serve ball if it exists
+        if self.serve_ball:
+            try:
+                self.game.entity_manager._remove_entity(self.serve_ball)
+            except:
+                pass
+            self.serve_ball = None
+            self.serve_toss_active = False
 
-        if self.serve_toss_active:
-            return
-
-        # Create ball for serve toss
+        # Create ball for serve toss - position toward net (奥 = beyond racket toward net)
         toss_pos = self.racket.position.copy()
-        toss_pos[1] += 0.1  # Start slightly above racket
+        toss_pos[1] += 0.05  # Start slightly above racket
+        # Move ball toward net by 1 ball diameter (~4cm)
+        if self.side == 1:
+            toss_pos[0] += 0.04  # Toward net for side 1 (+X direction)
+        else:
+            toss_pos[0] -= 0.04  # Toward net for side 2 (-X direction)
 
         # Spawn a ball for the toss
         nbt = {
-            'velocity': np.array([0.0, 2.5, 0.0]),  # Toss up
+            'velocity': np.array([0.0, 2.0, 0.0]),  # Toss up
             'spin': np.zeros(3)
         }
         self.serve_ball = self.game.entity_manager.summon('ball', toss_pos, nbt)
         self.serve_ball.active = True
+        # Set spawn time for collision cooldown
+        self.serve_ball.spawn_time = self.game.entity_manager._physics_time if hasattr(self.game.entity_manager, '_physics_time') else 0
         self.serve_toss_active = True
         self.serve_ready = True
         self.serve_time_start = pygame.time.get_ticks()
@@ -509,7 +668,7 @@ class PlayMode:
         return dy > 20  # Threshold for pull-back detection
 
     def _apply_swing_to_racket(self, swing_data):
-        """Apply swing analysis to racket orientation"""
+        """Apply swing analysis to racket orientation using rotation2"""
         if not self.racket:
             return
 
@@ -518,35 +677,42 @@ class PlayMode:
         curve = swing_data['curve']
 
         if speed < 50:  # Too slow for significant angle change
+            # Reset rotation2
+            self.racket.orientation_angle2 = 0.0
             return
 
         # Calculate racket tilt based on swing direction
-        # Swing direction determines which way racket is tilted
         dx, dy = direction
-        swing_angle = math.atan2(dy, dx)  # Angle of swing
 
-        # Map swing angle to racket tilt
-        # Horizontal swing (dx dominant) -> angle racket left/right
-        # Vertical swing (dy dominant) -> angle racket forward/back
+        # Calculate tilt amount based on swing speed (max ~45 degrees = 0.785 rad)
+        tilt_amount = min(0.785, speed / 500.0)
 
-        # Create compound rotation
-        base_angle = self.racket.orientation_angle
-        base_axis = self.racket.orientation_axis.copy()
+        # Use rotation2 with Y-axis for left/right swing direction
+        # Based on user's findings:
+        # - axis [0, 1, 0] with positive angle = right tilt
+        # - axis [0, 1, 0] with negative angle = left tilt
+        # Screen X movement (dx) determines left/right direction
 
-        # Tilt based on swing direction (simplified)
-        tilt_amount = min(0.5, speed / 1000.0)  # Cap tilt angle
+        # Normalize by swing distance to get direction
+        dist = math.sqrt(dx * dx + dy * dy)
+        if dist > 0:
+            # Primary direction is horizontal (left-right swing)
+            # dx > 0 = swing to right on screen = tilt right
+            # dx < 0 = swing to left on screen = tilt left
+            horizontal_factor = dx / dist  # -1 to 1
 
-        if abs(dx) > abs(dy):
-            # Horizontal swing - tilt around Z axis
-            tilt_axis = np.array([0.0, 0.0, 1.0])
-            tilt_angle = tilt_amount * np.sign(dx) * (1 if self.side == 1 else -1)
-        else:
-            # Vertical swing - tilt around X axis
-            tilt_axis = np.array([1.0, 0.0, 0.0])
-            tilt_angle = tilt_amount * np.sign(dy)
+            # Apply rotation2 around local Y-axis
+            self.racket.orientation_angle2 = tilt_amount * horizontal_factor
+            self.racket.orientation_axis2 = np.array([0.0, 1.0, 0.0])
 
-        # Apply tilt (simplified - just modify existing rotation)
-        self.racket.orientation_angle = base_angle + tilt_angle
+            # Adjust racket velocity based on swing for physics
+            # Horizontal swing affects Z velocity (left/right on table)
+            # Vertical swing affects X velocity (forward/back)
+            vel_scale = speed * 0.002
+            if self.side == 1:
+                self.racket.velocity = np.array([dy * vel_scale, 0.0, dx * vel_scale])
+            else:
+                self.racket.velocity = np.array([-dy * vel_scale, 0.0, -dx * vel_scale])
 
     def _check_swing_ball_collision(self, swing_data):
         """Check if swing hits any balls and apply physics"""
@@ -1317,20 +1483,45 @@ class GameWorld:
             args = result['args']
             entity = args['entity']
             position = args['position']
-            entity.position = position.copy()
+            # Check if entity is the player (pseudo-entity)
+            if entity.id == "player":
+                # Update actual camera position
+                self.camera_pos = position.copy()
+            else:
+                entity.position = position.copy()
             self.add_output(f"Teleported {entity.id} to ({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f})")
 
         elif cmd_type == 'rotate':
             args = result['args']
             entity = args['entity']
-            angle = args['angle']
-            axis = args['axis']
-            if hasattr(entity, 'orientation_angle'):
-                entity.orientation_angle = angle
-                entity.orientation_axis = axis.copy()
-                self.add_output(f"Rotated {entity.id}")
+            mode = args.get('mode', 'angle_axis')
+
+            if mode == 'yaw_pitch':
+                # Direct yaw/pitch rotation
+                yaw = args['yaw']
+                pitch = args['pitch']
+                if entity.id == "player":
+                    # Update actual camera rotation
+                    self.camera_yaw = yaw
+                    self.camera_pitch = pitch
+                    self.add_output(f"Rotated player to yaw={yaw:.1f}, pitch={pitch:.1f}")
+                elif hasattr(entity, 'rotation'):
+                    entity.rotation = np.array([yaw, pitch])
+                    self.add_output(f"Rotated {entity.id} to yaw={yaw:.1f}, pitch={pitch:.1f}")
+                else:
+                    self.add_output(f"Entity {entity.id} does not support yaw/pitch rotation")
             else:
-                self.add_output(f"Entity {entity.id} does not support rotation")
+                # angle-axis rotation (for entities)
+                angle = args['angle']
+                axis = args['axis']
+                if entity.id == "player":
+                    self.add_output(f"Use 'rotate @s <yaw> <pitch>' for player rotation")
+                elif hasattr(entity, 'orientation_angle'):
+                    entity.orientation_angle = angle
+                    entity.orientation_axis = axis.copy()
+                    self.add_output(f"Rotated {entity.id}")
+                else:
+                    self.add_output(f"Entity {entity.id} does not support rotation")
 
         elif cmd_type == 'tag_add':
             args = result['args']
@@ -1555,6 +1746,9 @@ class GameWorld:
             nbt['coefficient'] = f"[{entity.coefficient[0]:.2f}, {entity.coefficient[1]:.2f}]"
             nbt['restitution'] = f"[{entity.restitution[0]:.2f}, {entity.restitution[1]:.2f}]"
             nbt['rotation'] = f"{{angle:{entity.orientation_angle:.3f}, axis:[{entity.orientation_axis[0]:.2f}, {entity.orientation_axis[1]:.2f}, {entity.orientation_axis[2]:.2f}]}}"
+            # Secondary rotation
+            if hasattr(entity, 'orientation_angle2'):
+                nbt['rotation2'] = f"{{angle:{entity.orientation_angle2:.3f}, axis:[{entity.orientation_axis2[0]:.2f}, {entity.orientation_axis2[1]:.2f}, {entity.orientation_axis2[2]:.2f}]}}"
             if hasattr(entity, 'circular'):
                 nbt['circular'] = f"[{entity.circular[0]:.2f}, {entity.circular[1]:.2f}, {entity.circular[2]:.2f}]"
 
@@ -1651,10 +1845,42 @@ class GameWorld:
                         return True
                 return False
 
-            # Rotation (common to ball, racket, table)
+            # Rotation (common to ball, racket, table, and player)
             if path == 'rotation':
                 if isinstance(value, dict):
-                    if hasattr(entity, 'orientation_angle'):
+                    # Check if this is the player entity
+                    if hasattr(entity, 'id') and entity.id == "player":
+                        # Player rotation: support both {yaw:X, pitch:Y} and {angle:X, axis:[...]}
+                        if 'yaw' in value or 'pitch' in value:
+                            # Direct yaw/pitch format
+                            self.camera_yaw = float(value.get('yaw', self.camera_yaw))
+                            self.camera_pitch = float(value.get('pitch', self.camera_pitch))
+                            return True
+                        elif 'angle' in value:
+                            # angle-axis format - convert to yaw/pitch approximation
+                            # For simplicity, use yaw as angle when axis is [0,1,0] (Y-up)
+                            angle = float(value.get('angle', 0))
+                            axis = value.get('axis', [0, 1, 0])
+                            if isinstance(axis, list):
+                                axis = np.array(axis, dtype=float)
+                            # Convert angle from radians to degrees
+                            angle_deg = np.degrees(angle)
+                            # If axis is primarily Y (up), treat as yaw
+                            if abs(axis[1]) > 0.9:
+                                self.camera_yaw = angle_deg
+                            # If axis is primarily X, treat as pitch
+                            elif abs(axis[0]) > 0.9:
+                                self.camera_pitch = angle_deg
+                            # If axis is primarily Z, also treat as pitch (looking up/down)
+                            elif abs(axis[2]) > 0.9:
+                                self.camera_pitch = -angle_deg if axis[2] < 0 else angle_deg
+                            else:
+                                # Mixed axis - approximate
+                                self.camera_yaw = angle_deg * axis[1]
+                                self.camera_pitch = angle_deg * axis[0]
+                            return True
+                        return False
+                    elif hasattr(entity, 'orientation_angle'):
                         entity.orientation_angle = float(value.get('angle', 0))
                         axis = value.get('axis', [0, 1, 0])
                         if isinstance(axis, list):
@@ -1694,6 +1920,17 @@ class GameWorld:
                 elif path == 'restitution':
                     if isinstance(value, list) and len(value) >= 2:
                         entity.restitution = [float(value[0]), float(value[1])]
+                        return True
+                elif path == 'rotation2':
+                    # Secondary rotation for rackets
+                    if isinstance(value, dict):
+                        entity.orientation_angle2 = float(value.get('angle', 0))
+                        axis2 = value.get('axis', [0, 1, 0])
+                        if isinstance(axis2, list):
+                            entity.orientation_axis2 = np.array(axis2, dtype=float)
+                            norm = np.linalg.norm(entity.orientation_axis2)
+                            if norm > 0:
+                                entity.orientation_axis2 = entity.orientation_axis2 / norm
                         return True
 
             # Table properties
@@ -2245,10 +2482,36 @@ class GameWorld:
         glPushMatrix()
         glTranslatef(*pos)
 
-        # Apply angle-axis rotation from NBT
-        angle_deg = math.degrees(racket.orientation_angle)
+        # Apply rotations: rotation (base) first, then rotation2 (local adjustment)
+        # rotation2's axis is specified in LOCAL coordinates (after rotation)
+        # OpenGL does NOT automatically interpret axes in local coords,
+        # so we must explicitly transform rotation2's axis by rotation
+
+        angle = racket.orientation_angle
+        axis = racket.orientation_axis
+
+        # Apply primary rotation first
+        angle_deg = math.degrees(angle)
         if abs(angle_deg) > 0.01:
-            glRotatef(angle_deg, *racket.orientation_axis)
+            glRotatef(angle_deg, *axis)
+
+        # Apply secondary rotation (axis2 is in local coordinates)
+        if hasattr(racket, 'orientation_angle2'):
+            angle2 = racket.orientation_angle2
+            axis2_local = racket.orientation_axis2
+            angle2_deg = math.degrees(angle2)
+            if abs(angle2_deg) > 0.01:
+                # Transform axis2 from local coords to world coords using rotation
+                # axis2_world = R(angle, axis) * axis2_local
+                if abs(angle) > 0.01:
+                    cos_a = math.cos(angle)
+                    sin_a = math.sin(angle)
+                    k = np.array(axis)
+                    v = np.array(axis2_local)
+                    axis2_world = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
+                    glRotatef(angle2_deg, *axis2_world)
+                else:
+                    glRotatef(angle2_deg, *axis2_local)
 
         # Racket dimensions
         blade_width = 0.15   # X direction

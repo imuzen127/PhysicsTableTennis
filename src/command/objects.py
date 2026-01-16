@@ -107,6 +107,8 @@ class BallEntity(GameEntity):
     mass: float = 0.0027  # 2.7g
     trail: List[np.ndarray] = field(default_factory=list)
     bounce_count: int = 0
+    # Previous position for swept collision detection
+    prev_position: np.ndarray = field(default_factory=lambda: np.zeros(3))
     # Orientation (angle-axis representation)
     orientation_angle: float = 0.0  # Rotation angle in radians
     orientation_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))  # Default: Y-up
@@ -123,6 +125,8 @@ class BallEntity(GameEntity):
 class RacketEntity(GameEntity):
     """Racket entity with swing properties"""
     entity_type: EntityType = EntityType.RACKET
+    # Previous position for swept collision detection
+    prev_position: np.ndarray = field(default_factory=lambda: np.zeros(3))
     # Acceleration (angle-axis format)
     accel_angle: float = 0.0
     accel_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))
@@ -135,13 +139,18 @@ class RacketEntity(GameEntity):
     coefficient: List[float] = field(default_factory=lambda: [0.9, 0.9])
     # Restitution [red, black] - bounce coefficients
     restitution: List[float] = field(default_factory=lambda: [0.85, 0.85])
-    orientation_angle: float = 0.0  # Rotation angle in radians
+    orientation_angle: float = 0.0  # Rotation angle in radians (primary rotation)
     orientation_axis: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))  # Rotation axis
+    # Secondary rotation (applied after primary) - useful for base angle + adjustment
+    orientation_angle2: float = 0.0  # Second rotation angle in radians
+    orientation_axis2: np.ndarray = field(default_factory=lambda: np.array([0, 1, 0]))  # Second rotation axis
     # Circular motion (caret notation): [left, up, forward] relative to velocity direction
     circular: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, 1.0]))
     # Swing state
     swing_active: bool = False
     swing_time: float = 0.0
+    # Manual control mode (position controlled externally, not by physics)
+    manual_control: bool = False
 
 
 @dataclass
@@ -361,7 +370,7 @@ class EntityManager:
             elif isinstance(rest, (int, float)):
                 racket.restitution = [float(rest), float(rest)]
 
-        # Rotation (angle + axis)
+        # Rotation (angle + axis) - primary rotation
         if 'rotation' in nbt:
             rot = nbt['rotation']
             if isinstance(rot, dict):
@@ -371,6 +380,17 @@ class EntityManager:
                 norm = np.linalg.norm(racket.orientation_axis)
                 if norm > 0:
                     racket.orientation_axis = racket.orientation_axis / norm
+
+        # Secondary rotation (rotation2) - applied after primary
+        if 'rotation2' in nbt:
+            rot2 = nbt['rotation2']
+            if isinstance(rot2, dict):
+                racket.orientation_angle2 = float(rot2.get('angle', 0))
+                axis2 = rot2.get('axis', [0, 1, 0])
+                racket.orientation_axis2 = np.array(axis2, dtype=float)
+                norm2 = np.linalg.norm(racket.orientation_axis2)
+                if norm2 > 0:
+                    racket.orientation_axis2 = racket.orientation_axis2 / norm2
 
         # Tags
         if 'Tags' in nbt:
@@ -509,6 +529,17 @@ class EntityManager:
         if not self.simulation_running:
             return
 
+        # Track physics time for collision cooldowns
+        if not hasattr(self, '_physics_time'):
+            self._physics_time = 0.0
+        self._physics_time += dt
+
+        # Save previous positions for swept collision detection
+        for ball in self.balls:
+            ball.prev_position = ball.position.copy()
+        for racket in self.rackets:
+            racket.prev_position = racket.position.copy()
+
         # Update rackets (swing motion)
         for racket in self.rackets:
             if racket.active and racket.swing_active:
@@ -524,6 +555,10 @@ class EntityManager:
 
     def _update_racket(self, racket: RacketEntity, dt: float):
         """Update racket position during swing"""
+        # Skip position update if manually controlled (play mode)
+        if racket.manual_control:
+            return
+
         racket.swing_time += dt
 
         # Apply acceleration (angle-axis format) to velocity
@@ -874,178 +909,169 @@ class EntityManager:
                         ball2.position = ball2.position + separation
 
     def _check_ball_racket_collision(self, ball: BallEntity, racket: RacketEntity):
-        """Check and handle ball-racket collision"""
+        """Check and handle ball-racket collision using capture-and-release method"""
+        # Check collision cooldown to prevent double hits
+        cooldown_time = 0.15  # 150ms cooldown between hits
+        current_time = getattr(ball, 'last_racket_hit_time', -1)
+        if hasattr(self, '_physics_time') and current_time > 0:
+            if self._physics_time - current_time < cooldown_time:
+                return  # Skip - too soon after last hit
+
         # Racket dimensions
-        blade_width = 0.15   # X direction
-        blade_length = 0.16  # Z direction
-        blade_thick = 0.01   # Y direction (including rubber)
+        blade_width = 0.17   # X direction in local space
+        blade_length = 0.18  # Z direction in local space
+        blade_thick = 0.02   # Actual thickness
 
-        # Get ball position relative to racket
-        rel_pos = ball.position - racket.position
+        # Helper: Rodrigues rotation
+        def rotate_vector(v, k, angle):
+            """Rotate vector v around axis k by angle (radians)"""
+            if abs(angle) < 1e-6:
+                return v.copy()
+            cos_a = math.cos(angle)
+            sin_a = math.sin(angle)
+            return v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
 
-        # Apply inverse rotation to get position in racket's local frame
+        # Get rotation parameters
         angle = racket.orientation_angle
         axis = racket.orientation_axis
+        angle2 = getattr(racket, 'orientation_angle2', 0.0)
+        axis2_local = getattr(racket, 'orientation_axis2', np.array([0, 1, 0]))
 
-        if abs(angle) > 1e-6:
-            # Inverse rotation using Rodrigues' formula with -angle
-            k = axis
-            v = rel_pos
-            cos_a = math.cos(-angle)
-            sin_a = math.sin(-angle)
-            local_pos = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
+        # Transform rotation2's axis by rotation to get world-space axis
+        axis2_world = rotate_vector(axis2_local, axis, angle)
+
+        # Calculate racket normal in world coordinates
+        local_normal_plus = np.array([0.0, 1.0, 0.0])
+        world_normal = rotate_vector(local_normal_plus, axis, angle)
+        world_normal = rotate_vector(world_normal, axis2_world, angle2)
+
+        # Get ball position relative to racket in local coordinates
+        rel_pos = ball.position - racket.position
+        local_pos = rotate_vector(rel_pos, axis2_world, -angle2)
+        local_pos = rotate_vector(local_pos, axis, -angle)
+
+        # === CAPTURE ZONE CHECK ===
+        # Use a generous capture zone to catch the ball before it passes through
+        capture_radius = 0.12  # 12cm capture zone around racket center
+        capture_thickness = 0.08  # 8cm thickness zone (4cm each side)
+
+        # Check if ball is within capture zone
+        x_norm = local_pos[0] / ((blade_width / 2) + capture_radius)
+        z_norm = local_pos[2] / ((blade_length / 2) + capture_radius)
+        in_capture_ellipse = (x_norm ** 2 + z_norm ** 2) <= 1.0
+
+        y_dist = local_pos[1]
+        in_capture_zone = in_capture_ellipse and abs(y_dist) < capture_thickness
+
+        if not in_capture_zone:
+            return  # Ball not in capture zone
+
+        # Determine which side the ball is approaching from
+        # Use relative velocity to determine approach direction
+        rel_vel = ball.velocity - racket.velocity
+        vel_toward_racket = -np.dot(rel_vel, world_normal)  # Positive if approaching +Y face
+
+        # Also check previous frame to detect crossing
+        rel_pos_prev = ball.prev_position - racket.prev_position
+        local_pos_prev = rotate_vector(rel_pos_prev, axis2_world, -angle2)
+        local_pos_prev = rotate_vector(local_pos_prev, axis, -angle)
+        y_dist_prev = local_pos_prev[1]
+
+        # Detect if ball crossed the racket plane
+        crossed_from_plus = y_dist_prev > 0 and y_dist <= 0
+        crossed_from_minus = y_dist_prev < 0 and y_dist >= 0
+        crossed_plane = crossed_from_plus or crossed_from_minus
+
+        # Ball must be either: crossing the plane OR very close and approaching
+        is_approaching = vel_toward_racket > 0.5 or np.linalg.norm(rel_vel) > 1.0
+        close_enough = abs(y_dist) < (blade_thick / 2 + ball.radius + 0.02)
+
+        if not (crossed_plane or (close_enough and is_approaching)):
+            return  # Ball not colliding
+
+        # === COLLISION DETECTED - Apply physics ===
+        # Determine which side was hit
+        if crossed_plane:
+            is_red_side = crossed_from_plus  # Came from +Y side = red
         else:
-            local_pos = rel_pos
+            is_red_side = y_dist > 0
 
-        # Check if ball is within racket bounds (elliptical blade in XZ plane)
-        # Local coords: X = width, Y = thickness (up), Z = length
-        x_norm = local_pos[0] / (blade_width / 2)
-        z_norm = local_pos[2] / (blade_length / 2)
-        in_ellipse = (x_norm ** 2 + z_norm ** 2) <= 1.0
+        # Get rubber properties
+        if is_red_side:
+            rubber = racket.rubber_red
+            restitution = racket.restitution[0]
+            friction = racket.coefficient[0]
+            surface_normal = world_normal
+        else:
+            rubber = racket.rubber_black
+            restitution = racket.restitution[1]
+            friction = racket.coefficient[1]
+            surface_normal = -world_normal
 
-        # Check Y distance (thickness)
-        y_dist = abs(local_pos[1])
-        collision_dist = blade_thick / 2 + ball.radius
+        # === CAPTURE AND RELEASE METHOD ===
+        # 1. Place ball on racket surface
+        ball.position = racket.position + surface_normal * (blade_thick / 2 + ball.radius + 0.003)
 
-        if in_ellipse and y_dist < collision_dist:
-            # Collision detected!
-            # Determine which side was hit (red = +Y, black = -Y in local)
-            is_red_side = local_pos[1] > 0
+        # 2. Calculate output velocity based on racket velocity
+        racket_speed = np.linalg.norm(racket.velocity)
 
-            # Get rubber properties
-            if is_red_side:
-                rubber = racket.rubber_red
-                restitution = racket.restitution[0]
-                friction = racket.coefficient[0]
-            else:
-                rubber = racket.rubber_black
-                restitution = racket.restitution[1]
-                friction = racket.coefficient[1]
+        # Base reflection: reflect ball velocity off surface
+        vel_normal_component = np.dot(ball.velocity, surface_normal)
+        vel_tangent_component = ball.velocity - vel_normal_component * surface_normal
 
-            # Calculate normal in world coordinates
-            local_normal = np.array([0.0, 1.0 if is_red_side else -1.0, 0.0])
+        # New velocity = racket velocity contribution + reflection
+        # The faster the racket moves, the more it dominates the output
+        racket_contribution = min(racket_speed * 1.5, 15.0)  # Cap at 15 m/s
 
-            if abs(angle) > 1e-6:
-                # Rotate normal to world frame
-                k = axis
-                v = local_normal
-                cos_a = math.cos(angle)
-                sin_a = math.sin(angle)
-                world_normal = v * cos_a + np.cross(k, v) * sin_a + k * np.dot(k, v) * (1 - cos_a)
-            else:
-                world_normal = local_normal
+        if racket_speed > 0.5:
+            # Racket is moving - use racket velocity as primary
+            racket_dir = racket.velocity / racket_speed
+            # Output in racket direction, plus some of the original tangent
+            new_velocity = racket_dir * racket_contribution * restitution
+            new_velocity = new_velocity + vel_tangent_component * 0.3
+            # Add upward component to clear net
+            new_velocity[1] = max(new_velocity[1], 1.0)
+        else:
+            # Racket is slow - simple reflection
+            new_velocity = -vel_normal_component * restitution * surface_normal
+            new_velocity = new_velocity + vel_tangent_component * 0.8
+            new_velocity = new_velocity + racket.velocity * 0.5
 
-            # Relative velocity (ball relative to racket)
-            rel_vel = ball.velocity - racket.velocity
+        ball.velocity = new_velocity
 
-            # Velocity component along normal
-            vel_normal = np.dot(rel_vel, world_normal)
+        # === SPIN CALCULATION ===
+        rubber_type = rubber.rubber_type
+        tangent_speed = np.linalg.norm(vel_tangent_component)
 
-            # Only process if ball is approaching the surface
-            if vel_normal < 0:
-                # Get rubber type for special handling
-                rubber_type = rubber.rubber_type
-                
-                # Calculate impact strength (for pimple deformation)
-                impact_speed = abs(vel_normal)
-                
-                # Tangential velocity (for spin calculations)
-                vel_tangent = rel_vel - vel_normal * world_normal
-                tangent_speed = np.linalg.norm(vel_tangent)
-                
-                # === LONG PIMPLES SPECIAL PHYSICS ===
-                if rubber_type == RubberType.LONG_PIMPLES:
-                    # Phase 1: Initial contact - low friction (slipping)
-                    # Phase 2: Pimple buckling - energy absorption
-                    # Phase 3: Pimple wrap - increased friction
-                    # Phase 4: Release - spin reversal/knuckle
-                    
-                    # Simulate pimple tilt angle based on impact
-                    # Higher impact = more pimple deformation
-                    pimple_tilt = min(impact_speed * 30, 80)  # degrees, max 80
-                    tilt_rad = math.radians(pimple_tilt)
-                    
-                    # Effective friction changes with tilt
-                    # Low at start (tip contact), increases as pimple bends
-                    base_friction = rubber.friction  # ~0.2-0.4
-                    effective_friction = base_friction + 0.5 * math.sin(tilt_rad)
-                    
-                    # Non-linear restitution (buckling absorbs energy)
-                    # Buckling threshold around 2-3 m/s impact
-                    buckling_threshold = 2.5
-                    if impact_speed > buckling_threshold:
-                        # Post-buckling: much lower restitution
-                        buckling_factor = min((impact_speed - buckling_threshold) / 3.0, 0.5)
-                        effective_restitution = restitution * (1 - buckling_factor * 0.6)
-                    else:
-                        effective_restitution = restitution
-                    
-                    # Spin reversal effect
-                    # Long pimples preserve/reverse incoming spin rather than adding new spin
-                    spin_reversal = rubber.spin_reversal  # ~0.8
-                    
-                    # Reflect velocity with modified restitution
-                    ball.velocity = ball.velocity - (1 + effective_restitution) * vel_normal * world_normal
-                    ball.velocity = ball.velocity + racket.velocity * 0.7
-                    
-                    # Spin handling: partial reversal instead of friction-based generation
-                    if tangent_speed > 0:
-                        # Incoming spin contribution
-                        incoming_spin_component = np.dot(ball.spin, world_normal)
-                        
-                        # Reverse a portion of the spin
-                        ball.spin = ball.spin * (1 - spin_reversal * 0.5)
-                        
-                        # Add small random variation (pimple irregularity)
-                        random_factor = math.sin(ball.position[0] * 100 + ball.position[2] * 73)
-                        knuckle_variation = np.array([
-                            random_factor * 0.1,
-                            math.cos(ball.position[1] * 50) * 0.05,
-                            math.sin(ball.position[2] * 80) * 0.1
-                        ]) * tangent_speed * 10
-                        ball.spin = ball.spin + knuckle_variation
-                
-                # === SHORT PIMPLES (表ソフト) ===
-                elif rubber_type == RubberType.PIMPLES:
-                    # Less grip than inverted, more direct
-                    # Pimples are short and stiff - less deformation
-                    effective_friction = friction * 0.8
-                    
-                    ball.velocity = ball.velocity - (1 + restitution) * vel_normal * world_normal
-                    ball.velocity = ball.velocity + racket.velocity * 0.85
-                    
-                    if tangent_speed > 0:
-                        spin_axis = np.cross(world_normal, vel_tangent)
-                        if np.linalg.norm(spin_axis) > 0:
-                            spin_axis = spin_axis / np.linalg.norm(spin_axis)
-                            # Less spin generation than inverted
-                            spin_magnitude = tangent_speed * effective_friction * 35
-                            ball.spin = ball.spin * 0.7 + spin_axis * spin_magnitude
-                
-                # === ANTI-SPIN ===
-                elif rubber_type == RubberType.ANTI:
-                    # Very slippery - minimal spin effect
-                    ball.velocity = ball.velocity - (1 + restitution) * vel_normal * world_normal
-                    ball.velocity = ball.velocity + racket.velocity * 0.6
-                    
-                    # Almost no new spin, reduces existing spin
-                    ball.spin = ball.spin * 0.3
-                
-                # === INVERTED (裏ソフト) - Default behavior ===
-                else:
-                    ball.velocity = ball.velocity - (1 + restitution) * vel_normal * world_normal
-                    ball.velocity = ball.velocity + racket.velocity * 0.8
-                    
-                    if tangent_speed > 0:
-                        spin_axis = np.cross(world_normal, vel_tangent)
-                        if np.linalg.norm(spin_axis) > 0:
-                            spin_axis = spin_axis / np.linalg.norm(spin_axis)
-                            spin_magnitude = tangent_speed * friction * 50
-                            ball.spin = ball.spin + spin_axis * spin_magnitude
+        if rubber_type == RubberType.LONG_PIMPLES:
+            # Long pimples: spin reversal
+            spin_reversal = rubber.spin_reversal
+            ball.spin = ball.spin * (1 - spin_reversal * 0.5)
+        elif rubber_type == RubberType.PIMPLES:
+            # Short pimples: moderate spin
+            if tangent_speed > 0:
+                spin_axis = np.cross(surface_normal, vel_tangent_component)
+                if np.linalg.norm(spin_axis) > 0:
+                    spin_axis = spin_axis / np.linalg.norm(spin_axis)
+                    ball.spin = ball.spin * 0.7 + spin_axis * tangent_speed * friction * 30
+        elif rubber_type == RubberType.ANTI:
+            # Anti-spin: minimal spin
+            ball.spin = ball.spin * 0.3
+        else:
+            # Inverted: high spin
+            if tangent_speed > 0:
+                spin_axis = np.cross(surface_normal, vel_tangent_component)
+                if np.linalg.norm(spin_axis) > 0:
+                    spin_axis = spin_axis / np.linalg.norm(spin_axis)
+                    ball.spin = ball.spin * 0.5 + spin_axis * tangent_speed * friction * 50
 
-                # Push ball out of racket
-                penetration = collision_dist - y_dist
-                ball.position = ball.position + world_normal * (penetration + 0.001)
+        # Add spin from racket swing direction
+        if racket_speed > 1.0:
+            swing_spin = np.cross(surface_normal, racket.velocity) * 30
+            ball.spin = ball.spin + swing_spin
+
+        # Record hit time for cooldown
+        ball.last_racket_hit_time = self._physics_time
 
     def get_entity(self, entity_id: str) -> Optional[GameEntity]:
         """Get entity by ID"""
