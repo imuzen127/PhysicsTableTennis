@@ -2142,6 +2142,25 @@ class GameWorld:
 
             return f"summon {entity_type} {pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f} {nbt}"
 
+        # Build collision timestamp map: {racket_tag: [timestamps]} for skipping frame-based velocity
+        collision_timestamps = {}
+        if hasattr(self, '_recording_collisions'):
+            for collision in self._recording_collisions:
+                racket_tag = collision['racket_tag']
+                coll_time = collision['timestamp']
+                if racket_tag not in collision_timestamps:
+                    collision_timestamps[racket_tag] = []
+                collision_timestamps[racket_tag].append(coll_time)
+
+        def is_near_collision(racket_tag, timestamp, margin=50):
+            """Check if timestamp is within margin ms of any collision for this racket"""
+            if racket_tag not in collision_timestamps:
+                return False
+            for coll_time in collision_timestamps[racket_tag]:
+                if abs(timestamp - coll_time) <= margin:
+                    return True
+            return False
+
         # Process subsequent frames - calculate velocity from position changes
         for i in range(1, len(self.recording_memo)):
             frame = self.recording_memo[i]
@@ -2201,15 +2220,17 @@ class GameWorld:
                     # Set current position
                     commands.append((timestamp, f"data modify entity {selector} pos set value [{pos[0]:.6f},{pos[1]:.6f},{pos[2]:.6f}]"))
 
-                    # Calculate velocity for collision detection
-                    dt = (frame['timestamp'] - prev_frame['timestamp']) / 1000.0
-                    if dt > 0:
-                        vel = (pos - prev_pos) / dt
-                    else:
-                        vel = np.zeros(3)
+                    # Skip velocity command if near collision - COLLISION_CMD will handle it
+                    if not is_near_collision(tag, timestamp):
+                        # Calculate velocity for collision detection
+                        dt = (frame['timestamp'] - prev_frame['timestamp']) / 1000.0
+                        if dt > 0:
+                            vel = (pos - prev_pos) / dt
+                        else:
+                            vel = np.zeros(3)
 
-                    vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(vel)
-                    commands.append((timestamp, f"data modify entity {selector} velocity set value {{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"))
+                        vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(vel)
+                        commands.append((timestamp, f"data modify entity {selector} velocity set value {{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"))
                 else:
                     # For tables: use velocity-based movement
                     next_frame = self.recording_memo[i + 1] if i + 1 < len(self.recording_memo) else None
@@ -2251,8 +2272,9 @@ class GameWorld:
 
                 vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(required_vel)
                 selector = f"@e[tag={racket_tag}]"
-                # Use timestamp - 1 to set velocity just before collision
-                cmd_time = max(0, timestamp - 1)
+                # Set velocity 50ms before collision (margin matches is_near_collision)
+                # This ensures frame-based velocity commands are skipped and this velocity is used
+                cmd_time = max(0, timestamp - 50)
                 commands.append((cmd_time, f"data modify entity {selector} velocity set value {{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"))
                 self._debug_log(f"COLLISION_CMD: t={cmd_time} racket={racket_tag} vel={required_vel}")
 
