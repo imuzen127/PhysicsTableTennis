@@ -411,6 +411,10 @@ class EntityManager:
             if isinstance(tags, list):
                 racket.tags = [str(t) for t in tags]
 
+        # Manual control mode (for replay - enables swept collision interpolation)
+        if 'manual_control' in nbt:
+            racket.manual_control = bool(nbt['manual_control'])
+
         return racket
 
     def _create_table(self, position: np.ndarray, nbt: Dict[str, Any]) -> TableEntity:

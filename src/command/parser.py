@@ -183,10 +183,10 @@ class NBTParser:
 
         value = self.text[start:self.pos]
 
-        # Try to parse as number
-        if value.lower() == 'true':
+        # Try to parse as number or boolean
+        if value.lower() == 'true' or value == '1b':
             return True
-        elif value.lower() == 'false':
+        elif value.lower() == 'false' or value == '0b':
             return False
         else:
             try:
