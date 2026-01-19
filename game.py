@@ -2018,9 +2018,8 @@ class GameWorld:
             tags_str = ','.join(f'"{t}"' for t in all_tags)
 
             # Calculate initial velocity from position change to next frame
-            # For rackets: use 0 velocity since we'll set position directly
             initial_vel = np.zeros(3)
-            if entity_type != 'racket' and len(self.recording_memo) > 1:
+            if len(self.recording_memo) > 1:
                 next_frame = self.recording_memo[1]
                 next_entity = get_entity_by_tag(next_frame, tag)
                 if next_entity:
@@ -2062,10 +2061,6 @@ class GameWorld:
             cmd = f"summon {entity_type} {pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f} {nbt}"
             commands.append((0, cmd))
 
-            # Enable manual_control for rackets (position-based replay with collision detection)
-            if entity_type == 'racket':
-                commands.append((0, f"data modify entity @e[tag={tag}] manual_control set value true"))
-
         # Start simulation
         commands.append((0, "start"))
 
@@ -2083,9 +2078,8 @@ class GameWorld:
             tags_str = ','.join(f'"{t}"' for t in all_tags)
 
             # Calculate initial velocity from position change to next frame
-            # For rackets: velocity 0 since we use position-based replay
             initial_vel = np.zeros(3)
-            if entity_type != 'racket' and next_entity and dt > 0:
+            if next_entity and dt > 0:
                 initial_vel = (next_entity['position'] - entity['position']) / dt
 
             vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(initial_vel)
@@ -2156,11 +2150,6 @@ class GameWorld:
                     next_dt = (next_frame['timestamp'] - frame['timestamp']) / 1000.0 if next_frame else dt
                     summon_cmd = generate_summon_cmd(entity, timestamp, next_entity, next_dt)
                     commands.append((timestamp, summon_cmd))
-
-                    # Enable manual_control for rackets (position-based replay)
-                    if entity_type == 'racket':
-                        commands.append((timestamp, f"data modify entity @e[tag={tag}] manual_control set value true"))
-
                     summoned_tags.add(tag)
                     continue  # Skip velocity update for the first frame of this entity
 
@@ -2172,13 +2161,25 @@ class GameWorld:
                 if entity_type == 'ball':
                     continue
 
-                # For rackets: use manual_control mode with prev_pos/pos for proper collision detection
-                if entity_type == 'racket':
-                    pos = entity['position']
-                    prev_pos = prev_entity['position'] if prev_entity else pos
-                    # Set prev_pos first (where racket was), then pos (where it should be)
-                    commands.append((timestamp, f"data modify entity {selector} prev_pos set value [{prev_pos[0]:.4f},{prev_pos[1]:.4f},{prev_pos[2]:.4f}]"))
-                    commands.append((timestamp, f"data modify entity {selector} pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"))
+                # Calculate velocity for NEXT interval (from current frame to next frame)
+                # This is the velocity needed to move FROM this position TO the next position
+                next_frame = self.recording_memo[i + 1] if i + 1 < len(self.recording_memo) else None
+                next_entity = get_entity_by_tag(next_frame, tag) if next_frame else None
+
+                if next_entity:
+                    next_dt = (next_frame['timestamp'] - frame['timestamp']) / 1000.0
+                    if next_dt > 0:
+                        vel = (next_entity['position'] - entity['position']) / next_dt
+                    else:
+                        vel = np.zeros(3)
+                else:
+                    # Last frame - stop moving
+                    vel = np.zeros(3)
+
+                vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(vel)
+
+                # Record velocity change
+                commands.append((timestamp, f"data modify entity {selector} velocity set value {{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"))
 
                 # Record rotation changes for rackets
                 if entity_type == 'racket':
@@ -3582,7 +3583,7 @@ class GameWorld:
             if self.play_mode.active:
                 self.play_mode.update(self.params.dt * self.time_scale)
 
-            for _ in range(3):
+            for _ in range(8):  # 8 * 2ms = 16ms, matches recording frame interval
                 self.update_physics()
 
             self.render()
