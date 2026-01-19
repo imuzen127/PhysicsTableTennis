@@ -486,7 +486,7 @@ class PlayMode:
 
         # Use game's side button state for height control
         height_speed = 0.008  # Height change per frame (reduced)
-        min_y = self.table.height + 0.19
+        min_y = self.table.height + 0.05
         max_y = self.table.height + 2.5  # Increased limit
 
         if self.game.mouse_side2_held:  # Side button 2 = up
