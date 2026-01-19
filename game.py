@@ -442,7 +442,7 @@ class PlayMode:
         sensitivity = 0.008
 
         # Update spherical angles (no limits)
-        self.spin_yaw_offset += dx * sensitivity    # Horizontal rotation
+        self.spin_yaw_offset -= dx * sensitivity    # Horizontal rotation (inverted for natural feel)
         self.spin_pitch_offset -= dy * sensitivity  # Vertical tilt
 
         # Apply rotation
