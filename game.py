@@ -2020,9 +2020,10 @@ class GameWorld:
         if len(self.recording_memo) < 1:
             return commands
 
-        # Initial kill commands
+        # Initial kill commands - clean up all entities from previous replay
         commands.append((0, "kill @e[type=ball]"))
         commands.append((0, "kill @e[type=racket]"))
+        commands.append((0, "kill @e[type=table]"))
 
         # Get first frame for initial entity states
         first_frame = self.recording_memo[0]
