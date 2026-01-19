@@ -215,6 +215,11 @@ class EntityManager:
             raise ValueError(f"Unknown entity type: {entity_type}")
 
         self.entities[entity.id] = entity
+
+        # If simulation is already running, activate the new entity
+        if self.simulation_running:
+            entity.active = True
+
         return entity
 
     def _create_ball(self, position: np.ndarray, nbt: Dict[str, Any]) -> BallEntity:
