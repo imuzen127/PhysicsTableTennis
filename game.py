@@ -2006,6 +2006,11 @@ class GameWorld:
                 if not prev_entity:
                     continue
 
+                # Skip velocity updates for balls - they respond to physics naturally
+                # Only rackets and tables need velocity/rotation updates
+                if entity_type == 'ball':
+                    continue
+
                 # Calculate velocity from position change
                 vel = (entity['position'] - prev_entity['position']) / dt
                 vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(vel)
