@@ -2244,21 +2244,36 @@ class GameWorld:
                 f"Time Scale: {self.time_scale}x",
             ]
 
-            # Show first active ball info
+            # Show closest active ball info
             active_balls = [b for b in self.entity_manager.balls if b.active]
             if active_balls:
-                ball = active_balls[0]
-                ball_pos = ball.position
-                ball_vel = ball.velocity
-                ball_speed = np.linalg.norm(ball_vel)
-                ball_rpm = np.linalg.norm(ball.spin) * 60 / (2 * math.pi)
-                debug_lines.extend([
-                    f"",
-                    f"Ball XYZ: {ball_pos[0]:.3f} / {ball_pos[1]:.3f} / {ball_pos[2]:.3f}",
-                    f"Ball Vel: {ball_vel[0]:.2f} / {ball_vel[1]:.2f} / {ball_vel[2]:.2f}",
-                    f"Ball Speed: {ball_speed:.2f} m/s",
-                    f"Ball Spin: {ball_rpm:.0f} RPM",
-                ])
+                # Find closest ball to player (use racket position in play mode, camera otherwise)
+                if self.play_mode.active and self.play_mode.racket:
+                    ref_pos = self.play_mode.racket.position
+                else:
+                    ref_pos = self.camera_pos
+
+                closest_ball = None
+                closest_dist = float('inf')
+                for b in active_balls:
+                    dist = np.linalg.norm(b.position - ref_pos)
+                    if dist < closest_dist:
+                        closest_dist = dist
+                        closest_ball = b
+
+                if closest_ball:
+                    ball = closest_ball
+                    ball_pos = ball.position
+                    ball_vel = ball.velocity
+                    ball_speed = np.linalg.norm(ball_vel)
+                    ball_rpm = np.linalg.norm(ball.spin) * 60 / (2 * math.pi)
+                    debug_lines.extend([
+                        f"",
+                        f"Ball XYZ: {ball_pos[0]:.3f} / {ball_pos[1]:.3f} / {ball_pos[2]:.3f}",
+                        f"Ball Vel: {ball_vel[0]:.2f} / {ball_vel[1]:.2f} / {ball_vel[2]:.2f}",
+                        f"Ball Speed: {ball_speed:.2f} m/s",
+                        f"Ball Spin: {ball_rpm:.0f} RPM",
+                    ])
 
             # Semi-transparent background
             debug_height = len(debug_lines) * 20 + 10
