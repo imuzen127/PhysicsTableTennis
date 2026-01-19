@@ -1,0 +1,19 @@
+改めて、
+パターン1では
+data modify entity @e[tag=rake] rotation set value {angle:1.570,axis:[0,0,-1]}
+data modify entity @e[tag=rake] rotation2 set value {angle:0.785,axis:[0,1,0]}
+が右45度スイング用。
+data modify entity @e[tag=rake] rotation set value {angle:1.570,axis:[0,0,-1]}
+data modify entity @e[tag=rake] rotation2 set value {angle:0.785,axis:[0,-1,0]}
+が左45度スイング用。
+つまり、1行目は固定でスイング方向に対して、2行目のような修正が自動で行われるべき。
+
+パターン2では
+data modify entity @e[tag=rake2] rotation set value {angle:1.570,axis:[0,0,1]}
+data modify entity @e[tag=rake2] rotation2 set value {angle:0.785,axis:[0,1,0]}
+が右45度スイング用。
+data modify entity @e[tag=rake2] rotation set value {angle:1.570,axis:[0,0,1]}
+data modify entity @e[tag=rake2] rotation2 set value {angle:0.785,axis:[0,-1,0]}
+が左45度スイング用。
+
+上記の点を踏まえて、playコマンドのデフォルト視点やラケットの動きの修正をして。

@@ -1,0 +1,12 @@
+ラケットの角度調査。
+パターン1において、
+data modify entity @e[tag=rake] rotation set value {angle:1.570,axis:[0,0,-1]}
+上記でラケットの赤面が相手のほうを向く。
+data modify entity @e[tag=rake] rotation2 set value {angle:0.785,axis:[1,0,0]}
+が右に45度の打球。
+data modify entity @e[tag=rake] rotation2 set value {angle:0.785,axis:[-1,0,0]}
+が左に45度の打球。
+にそれぞれ適していることがわかる。
+
+まず、rotation2でy軸で回転させるべきなのにx軸でうまくいっているということは、rotationの計算が混ざってしまっているということである。
+これを直さなければ正しい数値を調べられない。

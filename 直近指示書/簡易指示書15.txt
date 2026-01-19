@@ -1,0 +1,17 @@
+「C:\Users\imuze\PhysicsTableTennis\直近指示書」を読んで、現在の状況を把握して。
+
+Traceback (most recent call last):
+  File "C:\Users\imuze\PhysicsTableTennis\game.py", line 2685, in <module>
+    main()
+  File "C:\Users\imuze\PhysicsTableTennis\game.py", line 2681, in main
+    game.run()
+  File "C:\Users\imuze\PhysicsTableTennis\game.py", line 2666, in run
+    self.play_mode.update(self.params.dt * self.time_scale)
+  File "C:\Users\imuze\PhysicsTableTennis\game.py", line 165, in update
+    self._update_auto_height()
+  File "C:\Users\imuze\PhysicsTableTennis\game.py", line 327, in _update_auto_height
+    table_height = self.table.height
+                   ^^^^^^^^^^^^^^^^^
+AttributeError: 'BallEntity' object has no attribute 'height'
+
+上記問題を解決して。

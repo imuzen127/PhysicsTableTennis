@@ -1,0 +1,6 @@
+data get entity @e[tag=tama]
+とかでnbtデータが表示できるけど、表示内容がアップデートされていない。
+spin: {rpm:300,axis:[1,0,0]}
+velocity:{angle:1.57,axis:[0,1,0],speed:3.0}
+acceleration:{angle:1.57,axis:[0,1,0],speed:3.0}
+上記のような表示形式になっていない。あと、tagsも表示されていない。

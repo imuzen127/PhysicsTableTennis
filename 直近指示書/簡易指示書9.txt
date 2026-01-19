@@ -1,0 +1,2 @@
+data modify entity @e[tag=rake] velocity set value {angle:0.0,axis:[0,1,0],speed:0.8}
+velocityをどんな値にしてもラケットの移動方向がなぜか変わらない。修正して。

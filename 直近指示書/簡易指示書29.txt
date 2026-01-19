@@ -1,0 +1,17 @@
+Traceback (most recent call last):
+  File "C:\Users\imuze\PhysicsTableTennis\game.py", line 2948, in <module>
+    main()
+  File "C:\Users\imuze\PhysicsTableTennis\game.py", line 2944, in main
+    game.run()
+  File "C:\Users\imuze\PhysicsTableTennis\game.py", line 2932, in run
+    self.update_physics()
+  File "C:\Users\imuze\PhysicsTableTennis\game.py", line 1222, in update_physics
+    self.entity_manager.update(dt, self.params)
+  File "C:\Users\imuze\PhysicsTableTennis\src\command\objects.py", line 554, in update
+    self._check_collisions(physics_params)
+  File "C:\Users\imuze\PhysicsTableTennis\src\command\objects.py", line 777, in _check_collisions
+    self._check_ball_racket_collision(ball, racket)
+  File "C:\Users\imuze\PhysicsTableTennis\src\command\objects.py", line 1061, in _check_ball_racket_collision
+    if tangent_speed > 0:
+       ^^^^^^^^^^^^^
+NameError: name 'tangent_speed' is not defined. Did you mean: 'racket_speed'?

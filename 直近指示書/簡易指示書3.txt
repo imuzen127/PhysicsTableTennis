@@ -1,0 +1,5 @@
+startコマンド(stopコマンドも)の拡張をしたい。nbtタグでbooleanのタグを追加して、それがstartコマンドstopコマンドで制御できるようにしたい。
+start @e[tag=aiu] でaiuタグを持つエンティティだけ動くみたいな感じ。
+あと、加速度も追加したい。nbt名はaccelerationだね。形式はacceleration:{angle:1.57,axis:[0,1,0],speed:0.1}みたいな感じでvelocityをいじる。
+velocity:{angle:1.57,axis:[0,1,0],speed:3.0},acceleration:{angle:1.57,axis:[0,1,0],speed:0.1}の場合、向きが一致しているから単純加速。
+velocity:{angle:1.57,axis:[0,1,0],speed:3.0},acceleration:{angle:0,axis:[0,0,0],speed:0.0}の場合、向きが違うし、speedが0なので、速度を維持しながら、加速度の向きに曲がっていく。

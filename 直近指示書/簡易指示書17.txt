@@ -1,0 +1,2 @@
+「/rotate @s 0 1」と打っても視点が変更されない。この場合、yaw0,pitch1を表す。
+「/data modify entity @s rotation set value {angle:4.5,axis:[0,0,-1]}」と打っても視点の変更がされない。

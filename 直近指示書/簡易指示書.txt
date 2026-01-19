@@ -1,0 +1,7 @@
+tagコマンド、Tags:[]nbt、tagセレクターを追加したい。tagコマンドは/tag @n[type=ball] add aiueoならば一番近くのボール1つにaiueoというタグをつける。するとballのnbtはTags:[''aiueo'']となる。2つ以上のタグならばTags:[''aiueo'',''kakikukeko'']というふうに連ねる。
+他、構文例：「tag @n[type=ball] remove aiueo」一番近くのボールのaiueoタグを消す。
+「tag @n[type=ball] list」一番近くのボールの持っているタグを全て表示する。
+セレクター引数にもなり「tag @n[tag=aiueo] add kakikukeko」ならば、一番近くのaiueoタグを持つエンティティにkakikukekoタグをつけるという意味になる。
+これでセレクター引数はtypeとtagの2種類となる。また、typeに繋がるのはballとracketとtableの3つ。
+そしてこれも復習になるが、セレクターは@e、@nの2種類。それぞれ、全てのエンティティと一番近くのエンティティという意味になる。
+セレクターとセレクター引数ではセレクター引数の方が優先順位が高く、@e[type=ball]であれば全てのボールという意味になる。

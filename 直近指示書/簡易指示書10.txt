@@ -1,0 +1,10 @@
+https://qiita.com/Hirobao1/items/9cf8805c7a5d311ed0e7
+上記リンクの軸角形式の説明参照
+
+https://ja.minecraft.wiki/w/%E5%BA%A7%E6%A8%99
+上記リンクより北がZマイナス方向、東がXプラス方向
+
+https://note.com/takenokoii/n/nfdfdb88746ce
+上記リンクのオイラー角の説明参照
+
+問題なのは時計回りか反時計回りかを知らない。それもXYZの正の方向から見てなのかもわからない。

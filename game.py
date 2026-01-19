@@ -1376,6 +1376,52 @@ class GameWorld:
             pos = args['position']
             self.add_output(f"Summoned {args['entity']} [{entity.id}] at ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f})")
 
+            # If recording, capture this summon immediately with original command data
+            if self.recording_active:
+                delay_ms = pygame.time.get_ticks() - self.recording_start_time
+                entity_type = args['entity']
+
+                # Assign recording tag
+                tag_num = self.recording_tag_counter.get(entity_type, 0)
+                tag = f"rec_{entity_type}_{tag_num}"
+                self.recording_tag_counter[entity_type] = tag_num + 1
+
+                # Track the entity
+                self.recording_entity_tags[id(entity)] = tag
+                self.recording_tracked_entities.add(id(entity))
+
+                # Record summon with ORIGINAL velocity/spin from args, not current entity state
+                nbt = args['nbt']
+                existing_tags = getattr(entity, 'tags', [])
+                all_tags = [t for t in existing_tags if not t.startswith('rec_')] + [tag]
+                tags_str = ','.join(f'"{t}"' for t in all_tags)
+
+                if entity_type == 'ball':
+                    vel = nbt.get('velocity', np.zeros(3))
+                    if isinstance(vel, np.ndarray):
+                        vel = vel.tolist()
+                    spin = nbt.get('spin', np.zeros(3))
+                    if isinstance(spin, np.ndarray):
+                        spin = spin.tolist()
+                    nbt_str = f"{{Tags:[{tags_str}],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}],spin:[{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]}}"
+                elif entity_type == 'racket':
+                    vel = nbt.get('velocity', np.zeros(3))
+                    if isinstance(vel, np.ndarray):
+                        vel = vel.tolist()
+                    rot = nbt.get('rotation', {'angle': 0, 'axis': [0, 1, 0]})
+                    if isinstance(rot, dict):
+                        rot_angle = rot.get('angle', 0)
+                        rot_axis = rot.get('axis', [0, 1, 0])
+                    else:
+                        rot_angle = 0
+                        rot_axis = [0, 1, 0]
+                    nbt_str = f"{{Tags:[{tags_str}],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}],rotation:{{angle:{rot_angle:.4f},axis:[{rot_axis[0]:.4f},{rot_axis[1]:.4f},{rot_axis[2]:.4f}]}}}}"
+                else:
+                    nbt_str = f"{{Tags:[{tags_str}]}}"
+
+                cmd = f"summon {entity_type} {pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f} {nbt_str}"
+                self.recording_data.append((delay_ms, cmd))
+
         elif cmd_type == 'kill':
             selector = result['args']['selector']
             # Use parser's selector resolver for full tag/type support
@@ -1785,6 +1831,7 @@ class GameWorld:
                     command = delay_match.group(2).strip()
                 else:
                     command = line
+                    current_delay = 0  # Reset delay for non-prefixed lines
 
                 if current_delay == 0:
                     self.process_command(command)
@@ -1865,19 +1912,19 @@ class GameWorld:
 
     def _recording_detect_new_entities(self, delay_ms: int):
         """Detect and register newly spawned entities"""
-        # Check balls
+        # Check balls (don't filter by active - register all existing balls)
         for ball in self.entity_manager.balls:
-            if ball.active and id(ball) not in self.recording_tracked_entities:
+            if id(ball) not in self.recording_tracked_entities:
                 self._recording_register_entity(ball, 'ball', delay_ms)
 
-        # Check rackets
+        # Check rackets (don't filter by active)
         for racket in self.entity_manager.rackets:
-            if racket.active and id(racket) not in self.recording_tracked_entities:
+            if id(racket) not in self.recording_tracked_entities:
                 self._recording_register_entity(racket, 'racket', delay_ms)
 
-        # Check tables
+        # Check tables (don't filter by active)
         for table in self.entity_manager.tables:
-            if table.active and id(table) not in self.recording_tracked_entities:
+            if id(table) not in self.recording_tracked_entities:
                 self._recording_register_entity(table, 'table', delay_ms)
 
     def _recording_detect_removed_entities(self, delay_ms: int):
