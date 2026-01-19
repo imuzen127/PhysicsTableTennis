@@ -95,9 +95,13 @@ class PlayMode:
         self.spin_pitch_offset = 0.0  # Vertical tilt (mouse Y drag)
         self.spin_yaw_offset = 0.0    # Horizontal rotation (mouse X drag)
 
-        # Double-click detection for serve toss
+        # Double-click detection for serve toss (left) and auto-height toggle (right)
         self.last_click_time = 0
+        self.last_right_click_time = 0
         self.double_click_threshold = 300  # ms
+
+        # Auto height adjustment toggle (default OFF)
+        self.auto_height_enabled = False
 
         # Serve state
         self.serve_ready = False
@@ -228,7 +232,16 @@ class PlayMode:
             self.swing_history = [(current_time, pos)]
             return True
 
-        elif button == 3:  # Right button - spin control
+        elif button == 3:  # Right button - spin control or toggle auto-height
+            # Check for double-click to toggle auto-height
+            if current_time - self.last_right_click_time < self.double_click_threshold:
+                self.auto_height_enabled = not self.auto_height_enabled
+                status = "ON" if self.auto_height_enabled else "OFF"
+                self.game.add_output(f"Auto height: {status}")
+                self.last_right_click_time = 0  # Reset to prevent triple-click
+                return True
+
+            self.last_right_click_time = current_time
             self.right_mouse_down = True
             self.right_mouse_start_pos = pos
             self.right_mouse_last_pos = pos
@@ -456,6 +469,10 @@ class PlayMode:
 
     def _update_auto_height(self):
         """Auto-adjust racket Y to match ball Y position (only for approaching balls)"""
+        # Check if auto-height is enabled (toggle with right double-click)
+        if not self.auto_height_enabled:
+            return
+
         if not self.table or not self.racket:
             return
 
