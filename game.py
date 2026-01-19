@@ -1459,29 +1459,16 @@ class GameWorld:
 
         elif cmd_type == 'kill':
             selector = result['args']['selector']
-            # Log state before kill
-            all_before = self.command_parser._get_all_entities()
-            self._debug_log(f"KILL BEFORE: balls={len(self.entity_manager.balls)} rackets={len(self.entity_manager.rackets)} tables={len(self.entity_manager.tables)} total={len(all_before)}")
-            for e in all_before:
-                self._debug_log(f"  ENTITY: id={e.id} type={e.entity_type.value} tags={getattr(e, 'tags', [])}")
-
             # Use parser's selector resolver for full tag/type support
             entities = self.command_parser._resolve_selector_multiple(selector)
-            self._debug_log(f"KILL selector={selector} matched={len(entities)} entities")
             count = 0
             for entity in entities:
                 # Only skip play_controlled entities if currently in play mode
                 if self.play_mode.active and 'play_controlled' in getattr(entity, 'tags', []):
-                    self._debug_log(f"KILL skipped play_controlled entity id={entity.id}")
                     continue
-                entity_id = entity.id
-                entity_type = type(entity).__name__
-                self._debug_log(f"KILL removing {entity_type} id={entity_id}")
                 self.entity_manager._remove_entity(entity)
                 count += 1
-
-            # Log state after kill
-            self._debug_log(f"KILL AFTER: balls={len(self.entity_manager.balls)} rackets={len(self.entity_manager.rackets)} tables={len(self.entity_manager.tables)}")
+            self._debug_log(f"KILL selector={selector} killed={count}")
             self.add_output(f"Killed {count} entities")
 
         elif cmd_type == 'start':
