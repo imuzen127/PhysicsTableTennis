@@ -221,6 +221,10 @@ class EntityManager:
         """Create a ball entity from NBT data"""
         ball = BallEntity(position=position.copy())
 
+        # Custom ID (for replay recordings)
+        if 'id' in nbt:
+            ball.id = str(nbt['id'])
+
         # Velocity
         if 'velocity' in nbt:
             if isinstance(nbt['velocity'], np.ndarray):
@@ -295,6 +299,10 @@ class EntityManager:
     def _create_racket(self, position: np.ndarray, nbt: Dict[str, Any]) -> RacketEntity:
         """Create a racket entity from NBT data"""
         racket = RacketEntity(position=position.copy())
+
+        # Custom ID (for replay recordings)
+        if 'id' in nbt:
+            racket.id = str(nbt['id'])
 
         # Velocity
         if 'velocity' in nbt:

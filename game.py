@@ -954,6 +954,9 @@ class GameWorld:
         self.recording_data = []  # List of (delay_ms, command_string)
         self.recording_last_frame_time = 0
         self.recording_frame_interval = 16  # Record every ~16ms (60fps)
+        self.recording_ball_ids = []  # Track ball IDs for recording
+        self.recording_racket_ids = []  # Track racket IDs for recording
+        self.recording_table_ids = []  # Track table IDs for recording
 
         # Spawn default table at origin
         self._spawn_default_table()
@@ -1654,8 +1657,13 @@ class GameWorld:
         self.recording_last_frame_time = self.recording_start_time
         self.recording_data = []
 
-        # Record initial state of all entities
-        self._record_full_state(0)
+        # Capture initial entity IDs for tracking
+        self.recording_ball_ids = [ball.id for ball in self.entity_manager.balls if ball.active]
+        self.recording_racket_ids = [racket.id for racket in self.entity_manager.rackets if racket.active]
+        self.recording_table_ids = [table.id for table in self.entity_manager.tables if table.active]
+
+        # Record initial summon commands (will be prefixed with kill commands when saving)
+        self._record_initial_summons()
 
         self.add_output(f"Recording started: {name}")
 
@@ -1681,6 +1689,13 @@ class GameWorld:
                 f.write(f"# Recorded at: {pygame.time.get_ticks()}\n")
                 f.write(f"# Total frames: {len(self.recording_data)}\n\n")
 
+                # First: Kill all existing entities
+                f.write("# Clear existing entities\n")
+                f.write("kill @e[type=ball]\n")
+                f.write("kill @e[type=racket]\n")
+                f.write("\n")
+
+                # Then write recorded commands (summons first, then modifies)
                 for delay_ms, command in self.recording_data:
                     if delay_ms > 0:
                         f.write(f"{delay_ms};{command}\n")
@@ -1693,6 +1708,9 @@ class GameWorld:
 
         self.recording_data = []
         self.recording_name = ""
+        self.recording_ball_ids = []
+        self.recording_racket_ids = []
+        self.recording_table_ids = []
 
     def _replay_recording(self, name: str):
         """Replay a saved recording"""
@@ -1759,34 +1777,59 @@ class GameWorld:
         self._record_full_state(delay_ms)
         self.recording_last_frame_time = current_time
 
-    def _record_full_state(self, delay_ms: int):
-        """Record full world state at current time"""
-        # Record balls
-        for i, ball in enumerate(self.entity_manager.balls):
-            if ball.active:
+    def _record_initial_summons(self):
+        """Record summon commands for all entities at recording start"""
+        # Summon balls with their initial state
+        for ball in self.entity_manager.balls:
+            if ball.active and ball.id in self.recording_ball_ids:
                 pos = ball.position
                 vel = ball.velocity
                 spin = ball.spin
-                # Use data modify command format (lowercase keys)
-                cmd = f"data modify entity @e[type=ball,limit=1,sort=arbitrary] pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"
-                self.recording_data.append((delay_ms, cmd))
-                cmd = f"data modify entity @e[type=ball,limit=1,sort=arbitrary] velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"
-                self.recording_data.append((delay_ms, cmd))
-                cmd = f"data modify entity @e[type=ball,limit=1,sort=arbitrary] spin set value [{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]"
-                self.recording_data.append((delay_ms, cmd))
+                # Summon with NBT including ID for later tracking
+                nbt = f"{{id:\"{ball.id}\",velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}],spin:[{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]}}"
+                cmd = f"summon ball {pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f} {nbt}"
+                self.recording_data.append((0, cmd))
 
-        # Record rackets
-        for i, racket in enumerate(self.entity_manager.rackets):
-            if racket.active:
+        # Summon rackets with their initial state
+        for racket in self.entity_manager.rackets:
+            if racket.active and racket.id in self.recording_racket_ids:
                 pos = racket.position
                 vel = racket.velocity
-                # Record position and velocity (lowercase keys)
-                cmd = f"data modify entity @e[type=racket,limit=1,sort=arbitrary] pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"
+                # Summon with NBT including ID
+                nbt = f"{{id:\"{racket.id}\",velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]}}"
+                cmd = f"summon racket {pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f} {nbt}"
+                self.recording_data.append((0, cmd))
+
+    def _record_full_state(self, delay_ms: int):
+        """Record full world state at current time using entity IDs"""
+        # Record balls by their tracked IDs
+        for ball in self.entity_manager.balls:
+            if ball.active and ball.id in self.recording_ball_ids:
+                pos = ball.position
+                vel = ball.velocity
+                spin = ball.spin
+                # Use entity ID selector for precise targeting
+                selector = f"@e[type=ball,nbt={{id:\"{ball.id}\"}}]"
+                cmd = f"data modify entity {selector} pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"
                 self.recording_data.append((delay_ms, cmd))
-                cmd = f"data modify entity @e[type=racket,limit=1,sort=arbitrary] velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"
+                cmd = f"data modify entity {selector} velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"
+                self.recording_data.append((delay_ms, cmd))
+                cmd = f"data modify entity {selector} spin set value [{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]"
+                self.recording_data.append((delay_ms, cmd))
+
+        # Record rackets by their tracked IDs
+        for racket in self.entity_manager.rackets:
+            if racket.active and racket.id in self.recording_racket_ids:
+                pos = racket.position
+                vel = racket.velocity
+                # Use entity ID selector
+                selector = f"@e[type=racket,nbt={{id:\"{racket.id}\"}}]"
+                cmd = f"data modify entity {selector} pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"
+                self.recording_data.append((delay_ms, cmd))
+                cmd = f"data modify entity {selector} velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"
                 self.recording_data.append((delay_ms, cmd))
                 # Record orientation
-                cmd = f"data modify entity @e[type=racket,limit=1,sort=arbitrary] rotation set value [{racket.orientation_angle:.4f},{racket.orientation_axis[0]:.4f},{racket.orientation_axis[1]:.4f},{racket.orientation_axis[2]:.4f}]"
+                cmd = f"data modify entity {selector} rotation set value [{racket.orientation_angle:.4f},{racket.orientation_axis[0]:.4f},{racket.orientation_axis[1]:.4f},{racket.orientation_axis[2]:.4f}]"
                 self.recording_data.append((delay_ms, cmd))
 
     def _get_entity_nbt(self, entity) -> dict:

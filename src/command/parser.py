@@ -519,18 +519,39 @@ class CommandParser:
         return nearest_entity
 
     def _parse_selector_args(self, args_str: str) -> Dict[str, str]:
-        """Parse selector arguments like type=ball,tag=mytag"""
+        """Parse selector arguments like type=ball,tag=mytag,nbt={id:"abc"}"""
         args = {}
         if not args_str:
             return args
-        for part in args_str.split(','):
+
+        # Handle nested braces in nbt={...}
+        parts = []
+        current = ""
+        brace_depth = 0
+        for char in args_str:
+            if char == '{':
+                brace_depth += 1
+                current += char
+            elif char == '}':
+                brace_depth -= 1
+                current += char
+            elif char == ',' and brace_depth == 0:
+                if current.strip():
+                    parts.append(current.strip())
+                current = ""
+            else:
+                current += char
+        if current.strip():
+            parts.append(current.strip())
+
+        for part in parts:
             if '=' in part:
                 key, value = part.split('=', 1)
                 args[key.strip()] = value.strip()
         return args
 
     def _filter_entities_by_args(self, entities: list, args: Dict[str, str]) -> list:
-        """Filter entity list by selector arguments (type, tag)"""
+        """Filter entity list by selector arguments (type, tag, nbt)"""
         result = entities
         if 'type' in args:
             target_type = args['type']
@@ -538,6 +559,14 @@ class CommandParser:
         if 'tag' in args:
             target_tag = args['tag']
             result = [e for e in result if target_tag in getattr(e, 'tags', [])]
+        if 'nbt' in args:
+            # Parse NBT filter like {id:"abc123"}
+            nbt_str = args['nbt']
+            # Extract id if present
+            id_match = re.search(r'id:\s*["\']?([^"\'}\s,]+)["\']?', nbt_str)
+            if id_match:
+                target_id = id_match.group(1)
+                result = [e for e in result if getattr(e, 'id', None) == target_id]
         return result
 
     def _get_all_entities(self) -> list:
