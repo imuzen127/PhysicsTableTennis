@@ -513,6 +513,8 @@ class PlayMode:
             'velocity': np.array([0.0, 1.8, 0.0]),  # Toss up (~16cm height for legal serve)
             'spin': np.zeros(3)
         }
+        # Debug: log spawn position
+        self.game._debug_log(f"SERVE_TOSS spawn: racket={self.racket.position} side={self.side} toss_pos={toss_pos}")
         self.serve_ball = self.game.entity_manager.summon('ball', toss_pos, nbt)
         self.serve_ball.active = True
         # Set spawn time for collision cooldown
@@ -1737,6 +1739,7 @@ class GameWorld:
         self.recording_start_time = pygame.time.get_ticks()
         self.recording_last_frame_time = self.recording_start_time
         self.recording_memo = []  # List of frame snapshots
+        self._debug_ball_captured = set()  # Reset debug tracking
 
         # Track all entities with unique tags
         self.recording_entity_tags = {}  # Maps id(entity) -> tag
@@ -1775,9 +1778,16 @@ class GameWorld:
         # Capture balls
         for ball in self.entity_manager.balls:
             if id(ball) in self.recording_entity_tags:
+                # Debug: log first capture of this ball
+                tag = self.recording_entity_tags[id(ball)]
+                if not hasattr(self, '_debug_ball_captured'):
+                    self._debug_ball_captured = set()
+                if tag not in self._debug_ball_captured:
+                    self._debug_log(f"FIRST_CAPTURE ball tag={tag} pos={ball.position}")
+                    self._debug_ball_captured.add(tag)
                 frame['entities'].append({
                     'type': 'ball',
-                    'tag': self.recording_entity_tags[id(ball)],
+                    'tag': tag,
                     'position': ball.position.copy(),
                     'spin': ball.spin.copy(),
                     'active': ball.active,
