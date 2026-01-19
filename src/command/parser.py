@@ -567,10 +567,6 @@ class CommandParser:
             if id_match:
                 target_id = id_match.group(1)
                 result = [e for e in result if getattr(e, 'id', None) == target_id]
-        # Exclude play_controlled entities unless explicitly targeting that tag
-        # This prevents replay commands from affecting player-controlled rackets
-        if args.get('tag') != 'play_controlled':
-            result = [e for e in result if 'play_controlled' not in getattr(e, 'tags', [])]
         return result
 
     def _get_all_entities(self) -> list:

@@ -931,15 +931,16 @@ class EntityManager:
             # Mesh absorbs energy - ball drops
         
         # Collision normal is in X direction (perpendicular to net)
-        if ball.velocity[0] > 0:
-            normal = np.array([-1.0, 0.0, 0.0])  # Ball moving +X, push back -X
+        # Normal should point AWAY from net on the side where ball is
+        if ball_rel_x > 0:
+            normal = np.array([1.0, 0.0, 0.0])   # Ball on +X side, push toward +X
         else:
-            normal = np.array([1.0, 0.0, 0.0])   # Ball moving -X, push back +X
-        
+            normal = np.array([-1.0, 0.0, 0.0])  # Ball on -X side, push toward -X
+
         # Decompose velocity
         vel_normal = np.dot(ball.velocity, normal)
-        
-        # Only process if ball is moving into the net
+
+        # Only process if ball is moving into the net (vel_normal < 0 means moving opposite to normal)
         if vel_normal >= 0:
             return
         

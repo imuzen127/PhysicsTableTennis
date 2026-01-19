@@ -1382,6 +1382,9 @@ class GameWorld:
             entities = self.command_parser._resolve_selector_multiple(selector)
             count = 0
             for entity in entities:
+                # Skip play_controlled entities (don't let replay kill player-controlled rackets)
+                if 'play_controlled' in getattr(entity, 'tags', []):
+                    continue
                 self.entity_manager._remove_entity(entity)
                 count += 1
             self.add_output(f"Killed {count} entities")
@@ -1447,6 +1450,9 @@ class GameWorld:
             entity = args['entity']
             path = args['path']
             value = args['value']
+            # Skip play_controlled entities (don't let replay modify player-controlled rackets)
+            if 'play_controlled' in getattr(entity, 'tags', []):
+                return
             success = self._set_entity_nbt(entity, path, value)
             if success:
                 self.add_output(f"Set {path} = {value}")
@@ -1461,6 +1467,9 @@ class GameWorld:
             args = result['args']
             entity = args['entity']
             position = args['position']
+            # Skip play_controlled entities (don't let replay teleport player-controlled rackets)
+            if 'play_controlled' in getattr(entity, 'tags', []):
+                return
             # Check if entity is the player (pseudo-entity)
             if entity.id == "player":
                 # Update actual camera position
@@ -1473,6 +1482,9 @@ class GameWorld:
             args = result['args']
             entity = args['entity']
             mode = args.get('mode', 'angle_axis')
+            # Skip play_controlled entities
+            if 'play_controlled' in getattr(entity, 'tags', []):
+                return
 
             if mode == 'yaw_pitch':
                 # Direct yaw/pitch rotation
