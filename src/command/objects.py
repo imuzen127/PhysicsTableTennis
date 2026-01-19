@@ -751,10 +751,57 @@ class EntityManager:
                 ball.position[1] = ball.radius
                 # Ground has low restitution and high friction
                 ball.velocity[1] = -ball.velocity[1] * 0.5
-                # Friction slows horizontal velocity on ground
-                ball.velocity[0] *= 0.7
-                ball.velocity[2] *= 0.7
+
+                # Friction with spin-to-roll conversion
+                # Contact point velocity: v_contact = v_ball + ω × r
+                # r = [0, -radius, 0], so ω × r = [ω_z*r, 0, -ω_x*r]
+                ground_friction = 0.6
+                r = ball.radius
+
+                # Slip velocity at contact point
+                contact_vel_x = ball.velocity[0] + ball.spin[2] * r
+                contact_vel_z = ball.velocity[2] - ball.spin[0] * r
+
+                # Friction reduces slip and transfers energy
+                # Gradually approach pure rolling condition
+                friction_factor = ground_friction * 0.3
+                ball.velocity[0] -= contact_vel_x * friction_factor
+                ball.velocity[2] -= contact_vel_z * friction_factor
+
+                # Spin also reduced by friction (moment of inertia effect)
+                ball.spin[0] += contact_vel_z * friction_factor / r * 0.4
+                ball.spin[2] -= contact_vel_x * friction_factor / r * 0.4
+
+                # General damping
+                ball.velocity[0] *= 0.85
+                ball.velocity[2] *= 0.85
+                ball.spin *= 0.9
+
                 ball.bounce_count += 1
+
+            # Rolling on ground (ball resting on ground with low bounce)
+            elif ball.position[1] < ball.radius + 0.002 and abs(ball.velocity[1]) < 0.5:
+                # Ball is essentially on the ground, apply rolling physics
+                ball.position[1] = ball.radius
+                ball.velocity[1] = 0  # Stop vertical bouncing
+
+                r = ball.radius
+                rolling_friction = 0.02  # Rolling resistance
+
+                # Convert spin to velocity (rolling)
+                # Pure rolling: v = ω × r
+                target_vel_x = -ball.spin[2] * r
+                target_vel_z = ball.spin[0] * r
+
+                # Blend toward rolling condition
+                blend = 0.1
+                ball.velocity[0] += (target_vel_x - ball.velocity[0]) * blend
+                ball.velocity[2] += (target_vel_z - ball.velocity[2]) * blend
+
+                # Apply rolling friction (slows both velocity and spin)
+                ball.velocity[0] *= (1 - rolling_friction)
+                ball.velocity[2] *= (1 - rolling_friction)
+                ball.spin *= (1 - rolling_friction)
 
             # Table surface collision - check against actual table entities
             for table in self.tables:

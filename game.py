@@ -947,6 +947,14 @@ class GameWorld:
         self.scheduled_commands = []
         self.function_start_time = 0  # Time when function started (ms)
 
+        # Recording system for save/replay
+        self.recording_active = False
+        self.recording_name = ""
+        self.recording_start_time = 0
+        self.recording_data = []  # List of (delay_ms, command_string)
+        self.recording_last_frame_time = 0
+        self.recording_frame_interval = 16  # Record every ~16ms (60fps)
+
         # Spawn default table at origin
         self._spawn_default_table()
 
@@ -1148,6 +1156,9 @@ class GameWorld:
         dt = self.params.dt * self.time_scale
         self.entity_manager.update(dt, self.params)
 
+        # Record frame for save/replay if active
+        self._record_frame()
+
     def handle_movement(self):
         """Handle player movement (Y-up coordinate system)"""
         if self.console_open or self.menu_open or self.data_popup_open:
@@ -1304,6 +1315,29 @@ class GameWorld:
                 self.process_command('summon ball -1 1.5 0 {velocity:[20,-2,0],spin:[0,0,2000]}')
                 self.entity_manager.start()
                 self.add_output("Smash demo started")
+
+            elif command == 'save':
+                # Start recording: /save <name>
+                if args:
+                    self._start_recording(args[0])
+                else:
+                    self.add_output("Usage: /save <name>")
+
+            elif command == 'saved':
+                # End recording and save: /saved <name>
+                if args:
+                    self._stop_recording(args[0])
+                elif self.recording_name:
+                    self._stop_recording(self.recording_name)
+                else:
+                    self.add_output("Usage: /saved <name>")
+
+            elif command == 'replay':
+                # Replay saved recording: /replay <name>
+                if args:
+                    self._replay_recording(args[0])
+                else:
+                    self.add_output("Usage: /replay <name>")
 
             else:
                 self.add_output(f"Unknown: {command}")
@@ -1612,6 +1646,149 @@ class GameWorld:
 
         self.scheduled_commands = still_pending
 
+    def _start_recording(self, name: str):
+        """Start recording world state for save/replay"""
+        self.recording_active = True
+        self.recording_name = name
+        self.recording_start_time = pygame.time.get_ticks()
+        self.recording_last_frame_time = self.recording_start_time
+        self.recording_data = []
+
+        # Record initial state of all entities
+        self._record_full_state(0)
+
+        self.add_output(f"Recording started: {name}")
+
+    def _stop_recording(self, name: str):
+        """Stop recording and save to file"""
+        if not self.recording_active:
+            self.add_output("No active recording")
+            return
+
+        self.recording_active = False
+
+        # Create saves folder if it doesn't exist
+        import os
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        saves_path = os.path.join(base_path, 'saves')
+        os.makedirs(saves_path, exist_ok=True)
+
+        # Write to .mcfunction file
+        file_path = os.path.join(saves_path, f'{name}.mcfunction')
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(f"# Save recording: {name}\n")
+                f.write(f"# Recorded at: {pygame.time.get_ticks()}\n")
+                f.write(f"# Total frames: {len(self.recording_data)}\n\n")
+
+                for delay_ms, command in self.recording_data:
+                    if delay_ms > 0:
+                        f.write(f"{delay_ms};{command}\n")
+                    else:
+                        f.write(f"{command}\n")
+
+            self.add_output(f"Saved: {name}.mcfunction ({len(self.recording_data)} commands)")
+        except Exception as e:
+            self.add_output(f"Error saving: {e}")
+
+        self.recording_data = []
+        self.recording_name = ""
+
+    def _replay_recording(self, name: str):
+        """Replay a saved recording"""
+        import os
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        saves_path = os.path.join(base_path, 'saves')
+        file_path = os.path.join(saves_path, f'{name}.mcfunction')
+
+        if not os.path.exists(file_path):
+            self.add_output(f"Save not found: {name}")
+            return
+
+        # Use existing function runner
+        self._run_function_from_path(file_path, name)
+
+    def _run_function_from_path(self, file_path: str, name: str):
+        """Run a function file from a specific path"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+
+            self.function_start_time = pygame.time.get_ticks()
+            cmd_count = 0
+            current_delay = 0
+
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if line.startswith('/'):
+                    line = line[1:]
+
+                delay_match = re.match(r'^(\d+);(.+)$', line)
+                if delay_match:
+                    current_delay = int(delay_match.group(1))
+                    command = delay_match.group(2).strip()
+                else:
+                    command = line
+
+                if current_delay == 0:
+                    self.process_command(command)
+                else:
+                    execute_time = self.function_start_time + current_delay
+                    self.scheduled_commands.append((execute_time, command))
+
+                cmd_count += 1
+
+            scheduled_count = len([c for c in self.scheduled_commands if c[0] > pygame.time.get_ticks()])
+            self.add_output(f"Replay {name}: {cmd_count} commands ({scheduled_count} scheduled)")
+
+        except Exception as e:
+            self.add_output(f"Error replaying: {e}")
+
+    def _record_frame(self):
+        """Record current frame state if recording is active"""
+        if not self.recording_active:
+            return
+
+        current_time = pygame.time.get_ticks()
+        if current_time - self.recording_last_frame_time < self.recording_frame_interval:
+            return
+
+        delay_ms = current_time - self.recording_start_time
+        self._record_full_state(delay_ms)
+        self.recording_last_frame_time = current_time
+
+    def _record_full_state(self, delay_ms: int):
+        """Record full world state at current time"""
+        # Record balls
+        for i, ball in enumerate(self.entity_manager.balls):
+            if ball.active:
+                pos = ball.position
+                vel = ball.velocity
+                spin = ball.spin
+                # Use data modify command format (lowercase keys)
+                cmd = f"data modify entity @e[type=ball,limit=1,sort=arbitrary] pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"
+                self.recording_data.append((delay_ms, cmd))
+                cmd = f"data modify entity @e[type=ball,limit=1,sort=arbitrary] velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"
+                self.recording_data.append((delay_ms, cmd))
+                cmd = f"data modify entity @e[type=ball,limit=1,sort=arbitrary] spin set value [{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]"
+                self.recording_data.append((delay_ms, cmd))
+
+        # Record rackets
+        for i, racket in enumerate(self.entity_manager.rackets):
+            if racket.active:
+                pos = racket.position
+                vel = racket.velocity
+                # Record position and velocity (lowercase keys)
+                cmd = f"data modify entity @e[type=racket,limit=1,sort=arbitrary] pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"
+                self.recording_data.append((delay_ms, cmd))
+                cmd = f"data modify entity @e[type=racket,limit=1,sort=arbitrary] velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"
+                self.recording_data.append((delay_ms, cmd))
+                # Record orientation
+                cmd = f"data modify entity @e[type=racket,limit=1,sort=arbitrary] rotation set value [{racket.orientation_angle:.4f},{racket.orientation_axis[0]:.4f},{racket.orientation_axis[1]:.4f},{racket.orientation_axis[2]:.4f}]"
+                self.recording_data.append((delay_ms, cmd))
+
     def _get_entity_nbt(self, entity) -> dict:
         """Get NBT data from entity"""
         from src.command.objects import BallEntity, RacketEntity, TableEntity
@@ -1701,6 +1878,13 @@ class GameWorld:
                 entity.active = bool(value)
                 return True
 
+            # Position
+            if path == 'pos' or path == 'position':
+                if isinstance(value, list):
+                    entity.position = np.array(value, dtype=float)
+                    return True
+                return False
+
             # Velocity (common - supports angle-axis format)
             if path == 'velocity':
                 if isinstance(value, dict):
@@ -1774,7 +1958,17 @@ class GameWorld:
 
             # Rotation (common to ball, racket, table, and player)
             if path == 'rotation':
-                if isinstance(value, dict):
+                # Support list format [angle, axis_x, axis_y, axis_z] for recordings
+                if isinstance(value, list) and len(value) == 4:
+                    if hasattr(entity, 'orientation_angle'):
+                        entity.orientation_angle = float(value[0])
+                        entity.orientation_axis = np.array([value[1], value[2], value[3]], dtype=float)
+                        norm = np.linalg.norm(entity.orientation_axis)
+                        if norm > 0:
+                            entity.orientation_axis = entity.orientation_axis / norm
+                        return True
+                    return False
+                elif isinstance(value, dict):
                     # Check if this is the player entity
                     if hasattr(entity, 'id') and entity.id == "player":
                         # Player rotation: support both {yaw:X, pitch:Y} and {angle:X, axis:[...]}
