@@ -923,6 +923,7 @@ class GameWorld:
 
         # Entity system
         self.entity_manager = EntityManager()
+        self.entity_manager.on_ball_ground_landing = self._on_ball_landing
         self.command_parser = None  # Initialized after self is ready
 
         # Player state (Y-up coordinate system)
@@ -1898,6 +1899,12 @@ class GameWorld:
             }
             self._recording_collisions.append(collision_data)
             self._debug_log(f"COLLISION_CAPTURED: ball={ball_tag} racket={racket_tag} vel_before={vel_before} vel_after={vel_after}")
+
+    def _on_ball_landing(self, ball, position):
+        """Callback for ball first ground contact - logs landing position for comparison"""
+        ball_tag = self.recording_entity_tags.get(id(ball), "unknown") if hasattr(self, 'recording_entity_tags') else "unknown"
+        tags = getattr(ball, 'tags', [])
+        self._debug_log(f"BALL_LANDING: tag={ball_tag} tags={tags} pos=[{position[0]:.4f},{position[1]:.4f},{position[2]:.4f}]")
 
     def _recording_assign_tag(self, entity, entity_type: str):
         """Assign a unique tag to an entity for tracking"""

@@ -191,6 +191,8 @@ class EntityManager:
         self.simulation_running: bool = False
         # Collision callback: called with (ball, racket, ball_velocity_before, ball_velocity_after)
         self.on_ball_racket_collision = None
+        # Ground landing callback: called with (ball, position) on first ground contact
+        self.on_ball_ground_landing = None
 
     def summon(self, entity_type: str, position: np.ndarray, nbt: Dict[str, Any]) -> GameEntity:
         """
@@ -767,9 +769,17 @@ class EntityManager:
 
             # Ground collision (Y is height)
             if ball.position[1] < ball.radius:
+                # Check if this is first ground contact (for landing detection)
+                was_first_landing = (ball.bounce_count == 0)
+                landing_pos = ball.position.copy()
+
                 ball.position[1] = ball.radius
                 # Ground has low restitution and high friction
                 ball.velocity[1] = -ball.velocity[1] * 0.5
+
+                # Call landing callback on first ground contact
+                if was_first_landing and self.on_ball_ground_landing:
+                    self.on_ball_ground_landing(ball, landing_pos)
 
                 # Friction with spin-to-roll conversion
                 # Contact point velocity: v_contact = v_ball + ω × r
