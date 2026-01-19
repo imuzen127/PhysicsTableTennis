@@ -1815,7 +1815,14 @@ class GameWorld:
             spin = entity.spin
             nbt = f"{{Tags:[\"{tag}\"],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}],spin:[{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]}}"
         elif entity_type == 'racket':
-            nbt = f"{{Tags:[\"{tag}\"],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]}}"
+            rot_axis = entity.orientation_axis
+            rot_nbt = f"rotation:{{angle:{entity.orientation_angle:.4f},axis:[{rot_axis[0]:.4f},{rot_axis[1]:.4f},{rot_axis[2]:.4f}]}}"
+            # Include secondary rotation if present
+            rot2_nbt = ""
+            if hasattr(entity, 'orientation_angle2'):
+                rot2_axis = entity.orientation_axis2
+                rot2_nbt = f",rotation2:{{angle:{entity.orientation_angle2:.4f},axis:[{rot2_axis[0]:.4f},{rot2_axis[1]:.4f},{rot2_axis[2]:.4f}]}}"
+            nbt = f"{{Tags:[\"{tag}\"],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}],{rot_nbt}{rot2_nbt}}}"
         elif entity_type == 'table':
             # Tables are static, minimal NBT
             nbt = f"{{Tags:[\"{tag}\"]}}"
@@ -1891,6 +1898,10 @@ class GameWorld:
                 self.recording_data.append((delay_ms, f"data modify entity {selector} pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"))
                 self.recording_data.append((delay_ms, f"data modify entity {selector} velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"))
                 self.recording_data.append((delay_ms, f"data modify entity {selector} rotation set value [{racket.orientation_angle:.4f},{racket.orientation_axis[0]:.4f},{racket.orientation_axis[1]:.4f},{racket.orientation_axis[2]:.4f}]"))
+                # Record secondary rotation (used in play mode for Y-axis rotation)
+                if hasattr(racket, 'orientation_angle2'):
+                    axis2 = racket.orientation_axis2
+                    self.recording_data.append((delay_ms, f"data modify entity {selector} rotation2 set value {{angle:{racket.orientation_angle2:.4f},axis:[{axis2[0]:.4f},{axis2[1]:.4f},{axis2[2]:.4f}]}}"))
 
         # Tables are static, no need to record state changes
 
