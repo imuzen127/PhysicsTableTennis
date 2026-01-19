@@ -128,6 +128,9 @@ class PlayMode:
         self.table = table
         self.side = side
 
+        # Debug: log racket identity
+        self.game._debug_log(f"PLAYMODE_ENTER: racket_id={id(racket)} racket.id={racket.id}")
+
         # Add play_controlled tag to prevent replay commands from affecting this racket
         if not hasattr(racket, 'tags'):
             racket.tags = []
@@ -381,6 +384,10 @@ class PlayMode:
         # Save previous position for swept collision detection
         self.racket.prev_position = old_pos
         self.racket.position = current_pos
+
+        # Debug: log position update during recording
+        if self.game.recording_active:
+            self.game._debug_log(f"PLAYMODE_POS_UPDATE: pos={current_pos} old={old_pos}")
 
         # Apply base rotation (but don't touch rotation2 - that's for swing)
         self._apply_base_rotation_only()
@@ -1862,6 +1869,7 @@ class GameWorld:
             self._recording_assign_tag(ball, 'ball')
         for racket in self.entity_manager.rackets:
             self._recording_assign_tag(racket, 'racket')
+            self._debug_log(f"RECORDING_START: racket py_id={id(racket)} entity_id={racket.id} pos={racket.position}")
         for table in self.entity_manager.tables:
             self._recording_assign_tag(table, 'table')
 
@@ -1942,10 +1950,14 @@ class GameWorld:
         # Capture rackets
         for racket in self.entity_manager.rackets:
             if id(racket) in self.recording_entity_tags:
+                tag = self.recording_entity_tags[id(racket)]
+                pos = racket.position.copy()
+                # Debug: log captured position
+                self._debug_log(f"RECORD_CAPTURE: t={timestamp_ms} tag={tag} pos={pos}")
                 entity_data = {
                     'type': 'racket',
-                    'tag': self.recording_entity_tags[id(racket)],
-                    'position': racket.position.copy(),
+                    'tag': tag,
+                    'position': pos,
                     'rotation_angle': racket.orientation_angle,
                     'rotation_axis': racket.orientation_axis.copy(),
                     'active': racket.active,
