@@ -523,7 +523,8 @@ class PlayMode:
             new_y = current_y + (target_y - current_y) * smooth_speed
 
             # Clamp to reasonable range (above table surface)
-            min_y = self.table.height + 0.05
+            # min_y includes half racket length (0.09) to prevent table clipping
+            min_y = self.table.height + 0.14
             max_y = self.table.height + 1.0
             self.racket.position[1] = max(min_y, min(max_y, new_y))
 
