@@ -1419,8 +1419,8 @@ class GameWorld:
             entities = self.command_parser._resolve_selector_multiple(selector)
             count = 0
             for entity in entities:
-                # Skip play_controlled entities (don't let replay kill player-controlled rackets)
-                if 'play_controlled' in getattr(entity, 'tags', []):
+                # Only skip play_controlled entities if currently in play mode
+                if self.play_mode.active and 'play_controlled' in getattr(entity, 'tags', []):
                     continue
                 self.entity_manager._remove_entity(entity)
                 count += 1
@@ -1493,8 +1493,9 @@ class GameWorld:
             path = args['path']
             value = args['value']
             entity_tags = getattr(entity, 'tags', [])
-            # Skip play_controlled entities (don't let replay modify player-controlled rackets)
-            if 'play_controlled' in entity_tags:
+            # Only skip play_controlled entities if currently in play mode
+            # (allows pure replay to work, but lets player control racket during play+replay)
+            if self.play_mode.active and 'play_controlled' in entity_tags:
                 return
             # Skip replay_freed entities (balls hit by play_controlled racket return to physics)
             if 'replay_freed' in entity_tags:
@@ -1511,8 +1512,8 @@ class GameWorld:
             args = result['args']
             entity = args['entity']
             position = args['position']
-            # Skip play_controlled entities (don't let replay teleport player-controlled rackets)
-            if 'play_controlled' in getattr(entity, 'tags', []):
+            # Only skip play_controlled entities if currently in play mode
+            if self.play_mode.active and 'play_controlled' in getattr(entity, 'tags', []):
                 return
             # Check if entity is the player (pseudo-entity)
             if entity.id == "player":
@@ -1526,8 +1527,8 @@ class GameWorld:
             args = result['args']
             entity = args['entity']
             mode = args.get('mode', 'angle_axis')
-            # Skip play_controlled entities
-            if 'play_controlled' in getattr(entity, 'tags', []):
+            # Only skip play_controlled entities if currently in play mode
+            if self.play_mode.active and 'play_controlled' in getattr(entity, 'tags', []):
                 return
 
             if mode == 'yaw_pitch':
