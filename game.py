@@ -1369,18 +1369,18 @@ class GameWorld:
         if cmd_type == 'summon':
             args = result['args']
             nbt = args['nbt']
-            # Debug: show velocity before summon
-            vel_info = nbt.get('velocity', 'none')
+            # Debug: show NBT Tags before summon
+            nbt_tags = nbt.get('Tags', 'none')
             entity = self.entity_manager.summon(
                 args['entity'],
                 args['position'],
                 nbt
             )
             pos = args['position']
-            # Debug: show actual velocity after summon
+            # Debug: show actual velocity and tags after summon
             vel_actual = entity.velocity if hasattr(entity, 'velocity') else 'none'
-            tags = getattr(entity, 'tags', [])
-            self.add_output(f"Summoned {args['entity']} [{entity.id}] pos=({pos[0]:.2f},{pos[1]:.2f},{pos[2]:.2f}) vel={vel_actual} tags={tags}")
+            entity_tags = getattr(entity, 'tags', [])
+            self.add_output(f"Summoned {args['entity']} nbt_Tags={nbt_tags} -> entity_tags={entity_tags}")
 
             # If recording, assign tag to new entity (will be captured in next frame)
             if self.recording_active:
@@ -1893,6 +1893,43 @@ class GameWorld:
         # Start simulation
         commands.append((0, "start"))
 
+        # Track entities that have been summoned
+        summoned_tags = set(entity['tag'] for entity in first_frame['entities'])
+
+        # Helper to generate summon command for an entity
+        def generate_summon_cmd(entity, timestamp, next_entity=None, dt=0.016):
+            tag = entity['tag']
+            entity_type = entity['type']
+            pos = entity['position']
+            tags = entity.get('tags', [])
+            all_tags = [t for t in tags if not t.startswith('rec_')] + [tag]
+            tags_str = ','.join(f'"{t}"' for t in all_tags)
+
+            # Calculate initial velocity from position change to next frame
+            initial_vel = np.zeros(3)
+            if next_entity and dt > 0:
+                initial_vel = (next_entity['position'] - entity['position']) / dt
+
+            vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(initial_vel)
+            vel_nbt = f"velocity:{{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"
+
+            if entity_type == 'ball':
+                spin = entity.get('spin', np.zeros(3))
+                nbt = f"{{Tags:[{tags_str}],{vel_nbt},spin:[{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]}}"
+            elif entity_type == 'racket':
+                rot_angle = entity.get('rotation_angle', 0)
+                rot_axis = entity.get('rotation_axis', [0, 1, 0])
+                rot_nbt = f"rotation:{{angle:{rot_angle:.4f},axis:[{rot_axis[0]:.4f},{rot_axis[1]:.4f},{rot_axis[2]:.4f}]}}"
+                rot2_nbt = ""
+                if 'rotation2_angle' in entity:
+                    rot2_axis = entity.get('rotation2_axis', [0, 1, 0])
+                    rot2_nbt = f",rotation2:{{angle:{entity['rotation2_angle']:.4f},axis:[{rot2_axis[0]:.4f},{rot2_axis[1]:.4f},{rot2_axis[2]:.4f}]}}"
+                nbt = f"{{Tags:[{tags_str}],{vel_nbt},{rot_nbt}{rot2_nbt}}}"
+            else:
+                nbt = f"{{Tags:[{tags_str}]}}"
+
+            return f"summon {entity_type} {pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f} {nbt}"
+
         # Process subsequent frames - calculate velocity from position changes
         for i in range(1, len(self.recording_memo)):
             frame = self.recording_memo[i]
@@ -1909,6 +1946,19 @@ class GameWorld:
                 selector = f"@e[tag={tag}]"
 
                 prev_entity = get_entity_by_tag(prev_frame, tag)
+
+                # Check if this is a new entity (not seen before)
+                if tag not in summoned_tags:
+                    # Generate summon command for this new entity
+                    # Look ahead to next frame for velocity calculation
+                    next_frame = self.recording_memo[i + 1] if i + 1 < len(self.recording_memo) else None
+                    next_entity = get_entity_by_tag(next_frame, tag) if next_frame else None
+                    next_dt = (next_frame['timestamp'] - frame['timestamp']) / 1000.0 if next_frame else dt
+                    summon_cmd = generate_summon_cmd(entity, timestamp, next_entity, next_dt)
+                    commands.append((timestamp, summon_cmd))
+                    summoned_tags.add(tag)
+                    continue  # Skip velocity update for the first frame of this entity
+
                 if not prev_entity:
                     continue
 
