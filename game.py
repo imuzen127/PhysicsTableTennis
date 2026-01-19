@@ -1879,6 +1879,20 @@ class GameWorld:
             'entities': []
         }
 
+        # First, check for any new entities that don't have recording tags yet
+        for ball in self.entity_manager.balls:
+            if id(ball) not in self.recording_entity_tags:
+                self._recording_assign_tag(ball, 'ball')
+                self._debug_log(f"NEW_ENTITY_DURING_RECORDING: ball tag={self.recording_entity_tags[id(ball)]}")
+        for racket in self.entity_manager.rackets:
+            if id(racket) not in self.recording_entity_tags:
+                self._recording_assign_tag(racket, 'racket')
+                self._debug_log(f"NEW_ENTITY_DURING_RECORDING: racket tag={self.recording_entity_tags[id(racket)]}")
+        for table in self.entity_manager.tables:
+            if id(table) not in self.recording_entity_tags:
+                self._recording_assign_tag(table, 'table')
+                self._debug_log(f"NEW_ENTITY_DURING_RECORDING: table tag={self.recording_entity_tags[id(table)]}")
+
         # Capture balls
         for ball in self.entity_manager.balls:
             if id(ball) in self.recording_entity_tags:
@@ -2012,6 +2026,10 @@ class GameWorld:
                     dt = (next_frame['timestamp'] - first_frame['timestamp']) / 1000.0  # ms to seconds
                     if dt > 0:
                         initial_vel = (next_entity['position'] - entity['position']) / dt
+                        # Compensate for physics timestep (16ms frame / 6ms physics = 2.67x)
+                        if entity_type == 'racket':
+                            physics_compensation = 16.0 / 6.0
+                            initial_vel = initial_vel * physics_compensation
 
             vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(initial_vel)
             vel_nbt = f"velocity:{{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"
@@ -2067,6 +2085,10 @@ class GameWorld:
             initial_vel = np.zeros(3)
             if next_entity and dt > 0:
                 initial_vel = (next_entity['position'] - entity['position']) / dt
+                # Compensate for physics timestep (16ms frame / 6ms physics = 2.67x) for rackets
+                if entity_type == 'racket':
+                    physics_compensation = 16.0 / 6.0
+                    initial_vel = initial_vel * physics_compensation
 
             vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(initial_vel)
             vel_nbt = f"velocity:{{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"
@@ -2156,6 +2178,12 @@ class GameWorld:
                     next_dt = (next_frame['timestamp'] - frame['timestamp']) / 1000.0
                     if next_dt > 0:
                         vel = (next_entity['position'] - entity['position']) / next_dt
+                        # Compensate for physics timestep difference:
+                        # Recording: positions captured every ~16ms
+                        # Physics: 3 updates * 2ms = 6ms per frame
+                        # Scale factor = frame_time / physics_time = 16 / 6 ≈ 2.67
+                        physics_compensation = 16.0 / 6.0  # ~2.67x
+                        vel = vel * physics_compensation
                     else:
                         vel = np.zeros(3)
                 else:
