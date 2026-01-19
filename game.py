@@ -991,7 +991,7 @@ class GameWorld:
         self.recording_start_time = 0
         self.recording_memo = []  # List of frame snapshots: {timestamp, entities: [...]}
         self.recording_last_frame_time = 0
-        self.recording_frame_interval = 16  # Record every ~16ms (60fps)
+        self.recording_frame_interval = 8  # Record every ~8ms (125fps) for better velocity capture
         self.recording_entity_tags = {}  # Maps id(entity) -> tag
         self.recording_tracked_entities = set()  # Set of id(entity) currently tracked
         self.recording_tag_counter = {}  # Counter for generating unique tags
@@ -2170,10 +2170,10 @@ class GameWorld:
                     next_dt = (next_frame['timestamp'] - frame['timestamp']) / 1000.0
                     if next_dt > 0:
                         vel = (next_entity['position'] - entity['position']) / next_dt
-                        # Compensate for physics timing: recording=16ms, physics=6ms per frame
-                        # Rackets need 16/6 ≈ 2.67x velocity to reach correct position
+                        # Compensate for physics timing: recording=8ms, physics=6ms per frame
+                        # Rackets need 8/6 ≈ 1.33x velocity to reach correct position
                         if entity_type == 'racket':
-                            vel = vel * (16.0 / 6.0)
+                            vel = vel * (8.0 / 6.0)
                     else:
                         vel = np.zeros(3)
                 else:
