@@ -568,13 +568,16 @@ class EntityManager:
             self._physics_time += sub_dt
             alpha = (substep + 1) / num_substeps
 
-            # Interpolate manual control racket positions
+            # Interpolate manual control racket positions and calculate velocity
             for racket in self.rackets:
                 if racket.manual_control and id(racket) in racket_start_positions:
                     racket.prev_position = racket.position.copy()
                     start = racket_start_positions[id(racket)]
                     end = racket_end_positions[id(racket)]
                     racket.position = start + (end - start) * alpha
+                    # Calculate velocity from position change for collision response
+                    if sub_dt > 0:
+                        racket.velocity = (racket.position - racket.prev_position) / sub_dt
 
             # Update non-manual rackets (swing motion)
             for racket in self.rackets:
@@ -1051,8 +1054,18 @@ class EntityManager:
             surface_normal = -world_normal
 
         # === CAPTURE AND RELEASE METHOD ===
-        # 1. Place ball on racket surface
-        ball.position = racket.position + surface_normal * (blade_thick / 2 + ball.radius + 0.003)
+        # 1. Place ball on racket surface at the actual contact point (not center)
+        # Keep the ball's local x,z position, only adjust y to surface
+        contact_local = local_pos.copy()
+        surface_offset = blade_thick / 2 + ball.radius + 0.003
+        if is_red_side:
+            contact_local[1] = surface_offset
+        else:
+            contact_local[1] = -surface_offset
+        # Transform back to world coordinates
+        contact_world = rotate_vector(contact_local, axis, angle)
+        contact_world = rotate_vector(contact_world, axis2_world, angle2)
+        ball.position = racket.position + contact_world
 
         # 2. Calculate output velocity based on racket velocity
         racket_speed = np.linalg.norm(racket.velocity)
