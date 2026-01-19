@@ -954,7 +954,9 @@ class GameWorld:
         self.recording_data = []  # List of (delay_ms, command_string)
         self.recording_last_frame_time = 0
         self.recording_frame_interval = 16  # Record every ~16ms (60fps)
-        self.recording_entity_tags = {}  # Maps entity id(obj) to recording tag
+        self.recording_entity_tags = {}  # Maps id(entity) -> tag
+        self.recording_tracked_entities = set()  # Set of id(entity) currently tracked
+        self.recording_tag_counter = {}  # Counter for generating unique tags
 
         # Spawn default table at origin
         self._spawn_default_table()
@@ -1653,26 +1655,33 @@ class GameWorld:
         self.recording_name = name
         self.recording_start_time = pygame.time.get_ticks()
         self.recording_last_frame_time = self.recording_start_time
-        self.recording_data = []
+        self.recording_data = []  # List of (delay_ms, command)
 
-        # Assign unique recording tags to each entity for tracking
-        # Format: rec_ball_0, rec_ball_1, rec_racket_0, etc.
-        self.recording_entity_tags = {}  # Maps entity object to its recording tag
+        # Track all entities with unique tags
+        # Format: rec_ball_0, rec_racket_0, rec_table_0, etc.
+        self.recording_entity_tags = {}  # Maps id(entity) -> tag
+        self.recording_tracked_entities = set()  # Set of id(entity) currently tracked
+        self.recording_tag_counter = {'ball': 0, 'racket': 0, 'table': 0}
 
-        for i, ball in enumerate(self.entity_manager.balls):
+        # Record initial kill commands to clear existing entities
+        self.recording_data.append((0, "kill @e[type=ball]"))
+        self.recording_data.append((0, "kill @e[type=racket]"))
+
+        # Register and summon all initial entities
+        for ball in self.entity_manager.balls:
             if ball.active:
-                tag = f"rec_ball_{i}"
-                self.recording_entity_tags[id(ball)] = tag
+                self._recording_register_entity(ball, 'ball', 0)
 
-        for i, racket in enumerate(self.entity_manager.rackets):
+        for racket in self.entity_manager.rackets:
             if racket.active:
-                tag = f"rec_racket_{i}"
-                self.recording_entity_tags[id(racket)] = tag
+                self._recording_register_entity(racket, 'racket', 0)
 
-        # Record initial summon commands
-        self._record_initial_summons()
+        for table in self.entity_manager.tables:
+            if table.active:
+                self._recording_register_entity(table, 'table', 0)
 
-        self.add_output(f"Recording started: {name}")
+        entity_count = len(self.recording_tracked_entities)
+        self.add_output(f"Recording started: {name} ({entity_count} entities)")
 
     def _stop_recording(self, name: str):
         """Stop recording and save to file"""
@@ -1694,9 +1703,9 @@ class GameWorld:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(f"# Save recording: {name}\n")
                 f.write(f"# Recorded at: {pygame.time.get_ticks()}\n")
-                f.write(f"# Total frames: {len(self.recording_data)}\n\n")
+                f.write(f"# Total commands: {len(self.recording_data)}\n\n")
 
-                # Write all recorded commands (kill, summon, modify in order)
+                # Write all recorded commands
                 for delay_ms, command in self.recording_data:
                     if delay_ms > 0:
                         f.write(f"{delay_ms};{command}\n")
@@ -1710,6 +1719,8 @@ class GameWorld:
         self.recording_data = []
         self.recording_name = ""
         self.recording_entity_tags = {}
+        self.recording_tracked_entities = set()
+        self.recording_tag_counter = {}
 
     def _replay_recording(self, name: str):
         """Replay a saved recording"""
@@ -1773,71 +1784,115 @@ class GameWorld:
             return
 
         delay_ms = current_time - self.recording_start_time
-        self._record_full_state(delay_ms)
+
+        # Check for new entities (spawned during recording)
+        self._recording_detect_new_entities(delay_ms)
+
+        # Check for removed entities (killed during recording)
+        self._recording_detect_removed_entities(delay_ms)
+
+        # Record state changes for all tracked entities
+        self._record_entity_states(delay_ms)
+
         self.recording_last_frame_time = current_time
 
-    def _record_initial_summons(self):
-        """Record kill and summon commands for all entities at recording start"""
-        # First: Kill all existing entities
-        self.recording_data.append((0, "kill @e[type=ball]"))
-        self.recording_data.append((0, "kill @e[type=racket]"))
+    def _recording_register_entity(self, entity, entity_type: str, delay_ms: int):
+        """Register an entity for tracking and record its summon command"""
+        # Assign unique tag
+        tag_num = self.recording_tag_counter.get(entity_type, 0)
+        tag = f"rec_{entity_type}_{tag_num}"
+        self.recording_tag_counter[entity_type] = tag_num + 1
 
-        # Summon balls with their initial state and unique tags
+        # Track the entity
+        self.recording_entity_tags[id(entity)] = tag
+        self.recording_tracked_entities.add(id(entity))
+
+        # Generate summon command
+        pos = entity.position
+        vel = entity.velocity
+
+        if entity_type == 'ball':
+            spin = entity.spin
+            nbt = f"{{Tags:[\"{tag}\"],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}],spin:[{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]}}"
+        elif entity_type == 'racket':
+            nbt = f"{{Tags:[\"{tag}\"],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]}}"
+        elif entity_type == 'table':
+            # Tables are static, minimal NBT
+            nbt = f"{{Tags:[\"{tag}\"]}}"
+        else:
+            nbt = f"{{Tags:[\"{tag}\"]}}"
+
+        cmd = f"summon {entity_type} {pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f} {nbt}"
+        self.recording_data.append((delay_ms, cmd))
+
+    def _recording_detect_new_entities(self, delay_ms: int):
+        """Detect and register newly spawned entities"""
+        # Check balls
+        for ball in self.entity_manager.balls:
+            if ball.active and id(ball) not in self.recording_tracked_entities:
+                self._recording_register_entity(ball, 'ball', delay_ms)
+
+        # Check rackets
+        for racket in self.entity_manager.rackets:
+            if racket.active and id(racket) not in self.recording_tracked_entities:
+                self._recording_register_entity(racket, 'racket', delay_ms)
+
+        # Check tables
+        for table in self.entity_manager.tables:
+            if table.active and id(table) not in self.recording_tracked_entities:
+                self._recording_register_entity(table, 'table', delay_ms)
+
+    def _recording_detect_removed_entities(self, delay_ms: int):
+        """Detect removed entities and record kill commands"""
+        # Build set of currently active entity ids
+        current_active = set()
+        for ball in self.entity_manager.balls:
+            if ball.active:
+                current_active.add(id(ball))
+        for racket in self.entity_manager.rackets:
+            if racket.active:
+                current_active.add(id(racket))
+        for table in self.entity_manager.tables:
+            if table.active:
+                current_active.add(id(table))
+
+        # Find entities that were tracked but are no longer active
+        removed = self.recording_tracked_entities - current_active
+        for entity_id in removed:
+            if entity_id in self.recording_entity_tags:
+                tag = self.recording_entity_tags[entity_id]
+                cmd = f"kill @e[tag={tag}]"
+                self.recording_data.append((delay_ms, cmd))
+                del self.recording_entity_tags[entity_id]
+
+        self.recording_tracked_entities = self.recording_tracked_entities & current_active
+
+    def _record_entity_states(self, delay_ms: int):
+        """Record state changes for all tracked entities"""
+        # Record balls
         for ball in self.entity_manager.balls:
             if ball.active and id(ball) in self.recording_entity_tags:
                 tag = self.recording_entity_tags[id(ball)]
+                selector = f"@e[tag={tag}]"
                 pos = ball.position
                 vel = ball.velocity
                 spin = ball.spin
-                # Summon with Tags for later tracking
-                nbt = f"{{Tags:[\"{tag}\"],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}],spin:[{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]}}"
-                cmd = f"summon ball {pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f} {nbt}"
-                self.recording_data.append((0, cmd))
+                self.recording_data.append((delay_ms, f"data modify entity {selector} pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"))
+                self.recording_data.append((delay_ms, f"data modify entity {selector} velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"))
+                self.recording_data.append((delay_ms, f"data modify entity {selector} spin set value [{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]"))
 
-        # Summon rackets with their initial state and unique tags
+        # Record rackets
         for racket in self.entity_manager.rackets:
             if racket.active and id(racket) in self.recording_entity_tags:
                 tag = self.recording_entity_tags[id(racket)]
+                selector = f"@e[tag={tag}]"
                 pos = racket.position
                 vel = racket.velocity
-                # Summon with Tags
-                nbt = f"{{Tags:[\"{tag}\"],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]}}"
-                cmd = f"summon racket {pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f} {nbt}"
-                self.recording_data.append((0, cmd))
+                self.recording_data.append((delay_ms, f"data modify entity {selector} pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"))
+                self.recording_data.append((delay_ms, f"data modify entity {selector} velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"))
+                self.recording_data.append((delay_ms, f"data modify entity {selector} rotation set value [{racket.orientation_angle:.4f},{racket.orientation_axis[0]:.4f},{racket.orientation_axis[1]:.4f},{racket.orientation_axis[2]:.4f}]"))
 
-    def _record_full_state(self, delay_ms: int):
-        """Record full world state at current time using tag selectors"""
-        # Record balls by their tracking tags
-        for ball in self.entity_manager.balls:
-            if ball.active and id(ball) in self.recording_entity_tags:
-                tag = self.recording_entity_tags[id(ball)]
-                pos = ball.position
-                vel = ball.velocity
-                spin = ball.spin
-                # Use tag selector for precise targeting
-                selector = f"@e[tag={tag}]"
-                cmd = f"data modify entity {selector} pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"
-                self.recording_data.append((delay_ms, cmd))
-                cmd = f"data modify entity {selector} velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"
-                self.recording_data.append((delay_ms, cmd))
-                cmd = f"data modify entity {selector} spin set value [{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]"
-                self.recording_data.append((delay_ms, cmd))
-
-        # Record rackets by their tracking tags
-        for racket in self.entity_manager.rackets:
-            if racket.active and id(racket) in self.recording_entity_tags:
-                tag = self.recording_entity_tags[id(racket)]
-                pos = racket.position
-                vel = racket.velocity
-                # Use tag selector
-                selector = f"@e[tag={tag}]"
-                cmd = f"data modify entity {selector} pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"
-                self.recording_data.append((delay_ms, cmd))
-                cmd = f"data modify entity {selector} velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"
-                self.recording_data.append((delay_ms, cmd))
-                # Record orientation
-                cmd = f"data modify entity {selector} rotation set value [{racket.orientation_angle:.4f},{racket.orientation_axis[0]:.4f},{racket.orientation_axis[1]:.4f},{racket.orientation_axis[2]:.4f}]"
-                self.recording_data.append((delay_ms, cmd))
+        # Tables are static, no need to record state changes
 
     def _get_entity_nbt(self, entity) -> dict:
         """Get NBT data from entity"""
