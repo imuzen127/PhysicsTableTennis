@@ -2170,6 +2170,10 @@ class GameWorld:
                     next_dt = (next_frame['timestamp'] - frame['timestamp']) / 1000.0
                     if next_dt > 0:
                         vel = (next_entity['position'] - entity['position']) / next_dt
+                        # Compensate for physics timing: recording=16ms, physics=6ms per frame
+                        # Rackets need 16/6 ≈ 2.67x velocity to reach correct position
+                        if entity_type == 'racket':
+                            vel = vel * (16.0 / 6.0)
                     else:
                         vel = np.zeros(3)
                 else:
@@ -3583,7 +3587,7 @@ class GameWorld:
             if self.play_mode.active:
                 self.play_mode.update(self.params.dt * self.time_scale)
 
-            for _ in range(8):  # 8 * 2ms = 16ms, matches recording frame interval
+            for _ in range(3):
                 self.update_physics()
 
             self.render()
