@@ -1914,14 +1914,13 @@ class GameWorld:
         # Physics simulation handles ball movement from initial state (summon)
         # This allows balls to interact with player-controlled rackets during replay
 
-        # Record rackets
+        # Record rackets - velocity and rotation only, no position
+        # Physics simulation will integrate velocity to calculate position
         for racket in self.entity_manager.rackets:
             if racket.active and id(racket) in self.recording_entity_tags:
                 tag = self.recording_entity_tags[id(racket)]
                 selector = f"@e[tag={tag}]"
-                pos = racket.position
                 vel = racket.velocity
-                self.recording_data.append((delay_ms, f"data modify entity {selector} pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"))
                 self.recording_data.append((delay_ms, f"data modify entity {selector} velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"))
                 self.recording_data.append((delay_ms, f"data modify entity {selector} rotation set value [{racket.orientation_angle:.4f},{racket.orientation_axis[0]:.4f},{racket.orientation_axis[1]:.4f},{racket.orientation_axis[2]:.4f}]"))
                 # Record secondary rotation (used in play mode for Y-axis rotation)
