@@ -2190,21 +2190,20 @@ class GameWorld:
                     continue
 
                 # For rackets: set position directly for perfect reproduction
-                # Also set velocity for collision calculations
+                # Also set prev_pos and velocity for collision calculations
                 if entity_type == 'racket':
                     pos = entity['position']
-                    # Set position directly
+                    prev_pos = prev_entity['position'] if prev_entity else pos
+
+                    # Set prev_position first (for swept collision interpolation)
+                    commands.append((timestamp, f"data modify entity {selector} prev_pos set value [{prev_pos[0]:.6f},{prev_pos[1]:.6f},{prev_pos[2]:.6f}]"))
+                    # Set current position
                     commands.append((timestamp, f"data modify entity {selector} pos set value [{pos[0]:.6f},{pos[1]:.6f},{pos[2]:.6f}]"))
 
                     # Calculate velocity for collision detection
-                    next_frame = self.recording_memo[i + 1] if i + 1 < len(self.recording_memo) else None
-                    next_entity = get_entity_by_tag(next_frame, tag) if next_frame else None
-                    if next_entity:
-                        next_dt = (next_frame['timestamp'] - frame['timestamp']) / 1000.0
-                        if next_dt > 0:
-                            vel = (next_entity['position'] - entity['position']) / next_dt
-                        else:
-                            vel = np.zeros(3)
+                    dt = (frame['timestamp'] - prev_frame['timestamp']) / 1000.0
+                    if dt > 0:
+                        vel = (pos - prev_pos) / dt
                     else:
                         vel = np.zeros(3)
 
