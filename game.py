@@ -1368,13 +1368,19 @@ class GameWorld:
 
         if cmd_type == 'summon':
             args = result['args']
+            nbt = args['nbt']
+            # Debug: show velocity before summon
+            vel_info = nbt.get('velocity', 'none')
             entity = self.entity_manager.summon(
                 args['entity'],
                 args['position'],
-                args['nbt']
+                nbt
             )
             pos = args['position']
-            self.add_output(f"Summoned {args['entity']} [{entity.id}] at ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f})")
+            # Debug: show actual velocity after summon
+            vel_actual = entity.velocity if hasattr(entity, 'velocity') else 'none'
+            tags = getattr(entity, 'tags', [])
+            self.add_output(f"Summoned {args['entity']} [{entity.id}] pos=({pos[0]:.2f},{pos[1]:.2f},{pos[2]:.2f}) vel={vel_actual} tags={tags}")
 
             # If recording, assign tag to new entity (will be captured in next frame)
             if self.recording_active:
@@ -1408,7 +1414,10 @@ class GameWorld:
             else:
                 # Start all
                 self.entity_manager.start()
-                self.add_output("Started simulation")
+                # Debug: show state after start
+                balls_active = sum(1 for b in self.entity_manager.balls if b.active)
+                balls_total = len(self.entity_manager.balls)
+                self.add_output(f"Started simulation: {balls_active}/{balls_total} balls active, running={self.entity_manager.simulation_running}")
 
         elif cmd_type == 'stop':
             selector = result['args'].get('selector')
@@ -1463,10 +1472,15 @@ class GameWorld:
             if 'replay_freed' in entity_tags:
                 return
             success = self._set_entity_nbt(entity, path, value)
-            if success:
-                self.add_output(f"Set {path} = {value}")
-            else:
-                self.add_output(f"Failed to set {path}")
+            # Debug: only show first few data_modify to avoid flooding
+            if not hasattr(self, '_data_modify_count'):
+                self._data_modify_count = 0
+            self._data_modify_count += 1
+            if self._data_modify_count <= 3:
+                if success:
+                    self.add_output(f"Set {path} = {value}")
+                else:
+                    self.add_output(f"Failed to set {path}")
 
         elif cmd_type == 'function':
             func_name = result['args']['name']
@@ -1625,6 +1639,7 @@ class GameWorld:
 
             # Record start time for this function
             self.function_start_time = pygame.time.get_ticks()
+            self._data_modify_count = 0  # Reset debug counter
 
             cmd_count = 0
             current_delay = 0  # Current delay in ms (inherited by subsequent lines)
@@ -1936,6 +1951,7 @@ class GameWorld:
                 lines = f.readlines()
 
             self.function_start_time = pygame.time.get_ticks()
+            self._data_modify_count = 0  # Reset debug counter
             cmd_count = 0
             current_delay = 0
 
