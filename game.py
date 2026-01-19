@@ -1390,24 +1390,35 @@ class GameWorld:
                 self.recording_entity_tags[id(entity)] = tag
                 self.recording_tracked_entities.add(id(entity))
 
-                # Record summon with ORIGINAL velocity/spin from args, not current entity state
+                # Record summon with ORIGINAL velocity/spin from args
                 nbt = args['nbt']
                 existing_tags = getattr(entity, 'tags', [])
                 all_tags = [t for t in existing_tags if not t.startswith('rec_')] + [tag]
                 tags_str = ','.join(f'"{t}"' for t in all_tags)
 
+                # Convert velocity to angle/axis/speed format
+                vel = nbt.get('velocity', np.zeros(3))
+                if isinstance(vel, np.ndarray):
+                    vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(vel)
+                elif isinstance(vel, list):
+                    vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(np.array(vel))
+                elif isinstance(vel, dict):
+                    # Already in angle/axis/speed format
+                    vel_angle = vel.get('angle', 0)
+                    vel_axis = vel.get('axis', [0, 1, 0])
+                    vel_speed = vel.get('speed', 0)
+                else:
+                    vel_angle, vel_axis, vel_speed = 0, [0, 1, 0], 0
+                vel_nbt = f"velocity:{{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"
+
                 if entity_type == 'ball':
-                    vel = nbt.get('velocity', np.zeros(3))
-                    if isinstance(vel, np.ndarray):
-                        vel = vel.tolist()
                     spin = nbt.get('spin', np.zeros(3))
                     if isinstance(spin, np.ndarray):
                         spin = spin.tolist()
-                    nbt_str = f"{{Tags:[{tags_str}],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}],spin:[{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]}}"
+                    elif not isinstance(spin, list):
+                        spin = [0, 0, 0]
+                    nbt_str = f"{{Tags:[{tags_str}],{vel_nbt},spin:[{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]}}"
                 elif entity_type == 'racket':
-                    vel = nbt.get('velocity', np.zeros(3))
-                    if isinstance(vel, np.ndarray):
-                        vel = vel.tolist()
                     rot = nbt.get('rotation', {'angle': 0, 'axis': [0, 1, 0]})
                     if isinstance(rot, dict):
                         rot_angle = rot.get('angle', 0)
@@ -1415,7 +1426,7 @@ class GameWorld:
                     else:
                         rot_angle = 0
                         rot_axis = [0, 1, 0]
-                    nbt_str = f"{{Tags:[{tags_str}],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}],rotation:{{angle:{rot_angle:.4f},axis:[{rot_axis[0]:.4f},{rot_axis[1]:.4f},{rot_axis[2]:.4f}]}}}}"
+                    nbt_str = f"{{Tags:[{tags_str}],{vel_nbt},rotation:{{angle:{rot_angle:.4f},axis:[{rot_axis[0]:.4f},{rot_axis[1]:.4f},{rot_axis[2]:.4f}]}}}}"
                 else:
                     nbt_str = f"{{Tags:[{tags_str}]}}"
 
@@ -1869,6 +1880,38 @@ class GameWorld:
 
         self.recording_last_frame_time = current_time
 
+    def _velocity_to_angle_axis_speed(self, vel):
+        """Convert velocity vector [vx,vy,vz] to {angle, axis, speed} format"""
+        speed = np.linalg.norm(vel)
+        if speed < 1e-6:
+            return 0.0, [0.0, 1.0, 0.0], 0.0
+
+        # Normalize to get direction
+        direction = vel / speed
+
+        # Default direction is [1,0,0] (X axis)
+        default_dir = np.array([1.0, 0.0, 0.0])
+
+        # Calculate rotation axis (cross product)
+        axis = np.cross(default_dir, direction)
+        axis_norm = np.linalg.norm(axis)
+
+        if axis_norm < 1e-6:
+            # Vectors are parallel or anti-parallel
+            if np.dot(default_dir, direction) > 0:
+                # Same direction, no rotation needed
+                return 0.0, [0.0, 1.0, 0.0], speed
+            else:
+                # Opposite direction, 180 degree rotation around Y
+                return math.pi, [0.0, 1.0, 0.0], speed
+
+        axis = axis / axis_norm
+
+        # Calculate rotation angle
+        angle = math.acos(np.clip(np.dot(default_dir, direction), -1.0, 1.0))
+
+        return angle, axis.tolist(), speed
+
     def _recording_register_entity(self, entity, entity_type: str, delay_ms: int):
         """Register an entity for tracking and record its summon command"""
         # Assign unique tag
@@ -1884,6 +1927,10 @@ class GameWorld:
         pos = entity.position
         vel = entity.velocity
 
+        # Convert velocity to angle/axis/speed format
+        vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(vel)
+        vel_nbt = f"velocity:{{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"
+
         # Preserve existing tags and add recording tag
         existing_tags = getattr(entity, 'tags', [])
         all_tags = existing_tags + [tag]
@@ -1891,7 +1938,7 @@ class GameWorld:
 
         if entity_type == 'ball':
             spin = entity.spin
-            nbt = f"{{Tags:[{tags_str}],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}],spin:[{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]}}"
+            nbt = f"{{Tags:[{tags_str}],{vel_nbt},spin:[{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]}}"
         elif entity_type == 'racket':
             rot_axis = entity.orientation_axis
             rot_nbt = f"rotation:{{angle:{entity.orientation_angle:.4f},axis:[{rot_axis[0]:.4f},{rot_axis[1]:.4f},{rot_axis[2]:.4f}]}}"
@@ -1900,7 +1947,7 @@ class GameWorld:
             if hasattr(entity, 'orientation_angle2'):
                 rot2_axis = entity.orientation_axis2
                 rot2_nbt = f",rotation2:{{angle:{entity.orientation_angle2:.4f},axis:[{rot2_axis[0]:.4f},{rot2_axis[1]:.4f},{rot2_axis[2]:.4f}]}}"
-            nbt = f"{{Tags:[{tags_str}],velocity:[{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}],{rot_nbt}{rot2_nbt}}}"
+            nbt = f"{{Tags:[{tags_str}],{vel_nbt},{rot_nbt}{rot2_nbt}}}"
         elif entity_type == 'table':
             # Tables are static, minimal NBT
             nbt = f"{{Tags:[{tags_str}]}}"
