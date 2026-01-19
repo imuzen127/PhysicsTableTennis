@@ -87,13 +87,13 @@ class PlayMode:
         self.swing_history = []  # Track mouse positions for swing curve analysis
         self.is_swinging = False
 
-        # Right mouse button state (spin control - angle/axis method)
+        # Right mouse button state (spin control - absolute axis rotation)
         self.right_mouse_down = False
         self.right_mouse_start_pos = (0, 0)
         self.right_mouse_last_pos = (0, 0)
-        # Angle/axis rotation control
-        self.angle_axis_direction = 0.0  # Direction of tilt axis (mouse X)
-        self.angle_axis_amount = 0.0     # Amount of tilt (mouse Y)
+        # Absolute axis rotation control
+        self.rotation_y_axis = 0.0  # Rotation around absolute Y axis (mouse up/down)
+        self.rotation_z_axis = 0.0  # Rotation around absolute Z axis (mouse left/right)
 
         # Double-click detection for serve toss
         self.last_click_time = 0
@@ -161,9 +161,9 @@ class PlayMode:
         self.is_swinging = False
         self.serve_ready = False
         self.serve_toss_active = False
-        # Reset angle/axis rotation
-        self.angle_axis_direction = 0.0
-        self.angle_axis_amount = 0.0
+        # Reset absolute axis rotation
+        self.rotation_y_axis = 0.0
+        self.rotation_z_axis = 0.0
 
     def exit(self):
         """Exit play mode"""
@@ -348,13 +348,19 @@ class PlayMode:
         old_pos = self.racket.position.copy()
         position_delta = current_pos - old_pos
         # Estimate velocity based on ~60fps (0.016s per frame)
-        vel_scale = 40.0  # Convert position delta to velocity (reduced from 60)
+        vel_scale = 40.0  # Convert position delta to velocity
         raw_velocity = position_delta * vel_scale
-        # Cap velocity to reasonable table tennis speeds (max ~12 m/s for normal play)
         speed = np.linalg.norm(raw_velocity)
+
+        # Non-linear scaling: boost slow movements, cap fast movements
+        # power < 1 compresses the range, making slow movements more effective
         max_speed = 12.0
-        if speed > max_speed:
-            self.racket.velocity = raw_velocity * (max_speed / speed)
+        if speed > 0.1:  # Minimum threshold
+            power = 0.7  # Boost slow movements
+            # Scale the speed through power curve then rescale
+            scaled_speed = (speed ** power) * 2.5  # Multiplier to maintain reasonable range
+            scaled_speed = min(scaled_speed, max_speed)
+            self.racket.velocity = (raw_velocity / speed) * scaled_speed
         else:
             self.racket.velocity = raw_velocity
 
@@ -366,24 +372,18 @@ class PlayMode:
         self._apply_base_rotation_only()
 
     def _apply_base_rotation_only(self):
-        """Apply base rotation with angle/axis adjustments"""
+        """Apply base rotation with absolute Y/Z axis adjustments"""
         if not self.racket or not self.side:
             return
 
         rot_config = self.RACKET_ROTATIONS[self.side]
-        # Base rotation (to face opponent)
-        self.racket.orientation_angle = rot_config['angle']
+        # rotation1: base rotation (around Z axis) + Z axis rotation from mouse X
+        self.racket.orientation_angle = rot_config['angle'] + self.rotation_z_axis
         self.racket.orientation_axis = rot_config['axis'].copy()
 
-        # Angle/axis tilt using rotation2
-        # Axis is in XZ plane, direction controlled by mouse X
-        tilt_axis = np.array([
-            np.cos(self.angle_axis_direction),
-            0.0,
-            np.sin(self.angle_axis_direction)
-        ])
-        self.racket.orientation_angle2 = self.angle_axis_amount
-        self.racket.orientation_axis2 = tilt_axis
+        # rotation2: Y axis rotation from mouse Y (horizontal spin)
+        self.racket.orientation_angle2 = self.rotation_y_axis
+        self.racket.orientation_axis2 = np.array([0.0, 1.0, 0.0])
 
     def _apply_racket_orientation(self):
         """Apply full racket orientation (both rotation and rotation2)"""
@@ -391,18 +391,13 @@ class PlayMode:
             return
 
         rot_config = self.RACKET_ROTATIONS[self.side]
-        # Base rotation
-        self.racket.orientation_angle = rot_config['angle']
+        # rotation1: base rotation + Z axis rotation
+        self.racket.orientation_angle = rot_config['angle'] + self.rotation_z_axis
         self.racket.orientation_axis = rot_config['axis'].copy()
 
-        # Angle/axis tilt
-        tilt_axis = np.array([
-            np.cos(self.angle_axis_direction),
-            0.0,
-            np.sin(self.angle_axis_direction)
-        ])
-        self.racket.orientation_angle2 = self.angle_axis_amount
-        self.racket.orientation_axis2 = tilt_axis
+        # rotation2: Y axis rotation
+        self.racket.orientation_angle2 = self.rotation_y_axis
+        self.racket.orientation_axis2 = np.array([0.0, 1.0, 0.0])
 
     def _update_racket_position(self, x_offset, z_offset):
         """Update racket world position (used for initial positioning)"""
@@ -439,21 +434,20 @@ class PlayMode:
         self._apply_racket_orientation()
 
     def _adjust_racket_angle(self, dx, dy):
-        """Adjust racket angle based on right-click drag (angle/axis method)
+        """Adjust racket angle based on right-click drag (absolute axis rotation)
 
-        dx > 0 (drag right) -> change tilt direction (rotate axis around Y)
-        dy > 0 (drag down) -> increase tilt amount
+        dy (mouse up/down) -> rotate around absolute Y axis (horizontal spin)
+        dx (mouse left/right) -> rotate around absolute Z axis (tilt)
         """
         if not self.racket:
             return
 
         # Sensitivity for angle adjustment
-        direction_sensitivity = 0.01
-        amount_sensitivity = 0.008
+        sensitivity = 0.008
 
-        # Update angle/axis values
-        self.angle_axis_direction -= dx * direction_sensitivity  # Which way to tilt
-        self.angle_axis_amount -= dy * amount_sensitivity        # How much to tilt
+        # Update absolute axis rotation values
+        self.rotation_y_axis -= dy * sensitivity  # Mouse up/down -> Y axis rotation
+        self.rotation_z_axis -= dx * sensitivity  # Mouse left/right -> Z axis rotation
 
         # Apply rotation
         self._apply_base_rotation_only()
