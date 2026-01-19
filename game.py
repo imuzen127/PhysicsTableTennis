@@ -1693,18 +1693,15 @@ class GameWorld:
         self.recording_data.append((0, "kill @e[type=ball]"))
         self.recording_data.append((0, "kill @e[type=racket]"))
 
-        # Register and summon all initial entities
+        # Register and summon all initial entities (check existence, not just active state)
         for ball in self.entity_manager.balls:
-            if ball.active:
-                self._recording_register_entity(ball, 'ball', 0)
+            self._recording_register_entity(ball, 'ball', 0)
 
         for racket in self.entity_manager.rackets:
-            if racket.active:
-                self._recording_register_entity(racket, 'racket', 0)
+            self._recording_register_entity(racket, 'racket', 0)
 
         for table in self.entity_manager.tables:
-            if table.active:
-                self._recording_register_entity(table, 'table', 0)
+            self._recording_register_entity(table, 'table', 0)
 
         # Start simulation after entities are summoned
         self.recording_data.append((0, "start"))
