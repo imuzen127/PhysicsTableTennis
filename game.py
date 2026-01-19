@@ -1844,6 +1844,10 @@ class GameWorld:
         self.recording_memo = []  # List of frame snapshots
         self._debug_ball_captured = set()  # Reset debug tracking
         self._recording_ball_spawns = {}  # Exact spawn data for balls
+        self._recording_collisions = []  # Collision events: {timestamp, ball_tag, racket_tag, vel_before, vel_after}
+
+        # Register collision callback
+        self.entity_manager.on_ball_racket_collision = self._on_collision_during_recording
 
         # Track all entities with unique tags
         self.recording_entity_tags = {}  # Maps id(entity) -> tag
@@ -1863,6 +1867,26 @@ class GameWorld:
 
         entity_count = len(self.recording_tracked_entities)
         self.add_output(f"Recording started: {name} ({entity_count} entities)")
+
+    def _on_collision_during_recording(self, ball, racket, vel_before, vel_after):
+        """Callback for ball-racket collision during recording"""
+        if not self.recording_active:
+            return
+
+        ball_tag = self.recording_entity_tags.get(id(ball))
+        racket_tag = self.recording_entity_tags.get(id(racket))
+
+        if ball_tag and racket_tag:
+            timestamp_ms = pygame.time.get_ticks() - self.recording_start_time
+            collision_data = {
+                'timestamp': timestamp_ms,
+                'ball_tag': ball_tag,
+                'racket_tag': racket_tag,
+                'vel_before': vel_before.copy(),
+                'vel_after': vel_after.copy()
+            }
+            self._recording_collisions.append(collision_data)
+            self._debug_log(f"COLLISION_CAPTURED: ball={ball_tag} racket={racket_tag} vel_before={vel_before} vel_after={vel_after}")
 
     def _recording_assign_tag(self, entity, entity_type: str):
         """Assign a unique tag to an entity for tracking"""
@@ -1948,6 +1972,9 @@ class GameWorld:
             return
 
         self.recording_active = False
+
+        # Unregister collision callback
+        self.entity_manager.on_ball_racket_collision = None
 
         if len(self.recording_memo) < 1:
             self.add_output("No frames recorded")
@@ -2207,6 +2234,27 @@ class GameWorld:
                     if 'rotation2_angle' in entity:
                         rot2_axis = entity.get('rotation2_axis', [0, 1, 0])
                         commands.append((timestamp, f"data modify entity {selector} rotation2 set value {{angle:{entity['rotation2_angle']:.4f},axis:[{rot2_axis[0]:.4f},{rot2_axis[1]:.4f},{rot2_axis[2]:.4f}]}}"))
+
+        # Add collision velocity commands - set correct racket velocity at collision time
+        if hasattr(self, '_recording_collisions'):
+            for collision in self._recording_collisions:
+                timestamp = collision['timestamp']
+                racket_tag = collision['racket_tag']
+                vel_before = collision['vel_before']
+                vel_after = collision['vel_after']
+
+                # Calculate required racket velocity from ball velocity change
+                # Using simplified formula: v_racket ≈ (v_after + e * v_before) / (e + 1)
+                # With e ≈ 0.9 (typical restitution)
+                e = 0.9
+                required_vel = (vel_after + e * vel_before) / (e + 1)
+
+                vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(required_vel)
+                selector = f"@e[tag={racket_tag}]"
+                # Use timestamp - 1 to set velocity just before collision
+                cmd_time = max(0, timestamp - 1)
+                commands.append((cmd_time, f"data modify entity {selector} velocity set value {{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"))
+                self._debug_log(f"COLLISION_CMD: t={cmd_time} racket={racket_tag} vel={required_vel}")
 
         return commands
 
