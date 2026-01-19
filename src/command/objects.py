@@ -770,7 +770,8 @@ class EntityManager:
             # Ground collision (Y is height)
             if ball.position[1] < ball.radius:
                 # Check if this is first ground contact (for landing detection)
-                was_first_landing = (ball.bounce_count == 0)
+                # Use ground_touched flag to track first ground landing specifically
+                was_first_ground = not getattr(ball, 'ground_touched', False)
                 landing_pos = ball.position.copy()
 
                 ball.position[1] = ball.radius
@@ -778,7 +779,8 @@ class EntityManager:
                 ball.velocity[1] = -ball.velocity[1] * 0.5
 
                 # Call landing callback on first ground contact
-                if was_first_landing and self.on_ball_ground_landing:
+                if was_first_ground and self.on_ball_ground_landing:
+                    ball.ground_touched = True
                     self.on_ball_ground_landing(ball, landing_pos)
 
                 # Friction with spin-to-roll conversion
