@@ -436,8 +436,8 @@ class PlayMode:
     def _adjust_racket_angle(self, dx, dy):
         """Adjust racket angle based on right-click drag (absolute axis rotation)
 
-        dy (mouse up/down) -> rotate around absolute Y axis (horizontal spin)
-        dx (mouse left/right) -> rotate around absolute Z axis (tilt)
+        dy (mouse up/down) -> rotate around absolute Z axis (tilt)
+        dx (mouse left/right) -> rotate around absolute Y axis (horizontal spin)
         """
         if not self.racket:
             return
@@ -446,8 +446,8 @@ class PlayMode:
         sensitivity = 0.008
 
         # Update absolute axis rotation values
-        self.rotation_y_axis -= dy * sensitivity  # Mouse up/down -> Y axis rotation
-        self.rotation_z_axis -= dx * sensitivity  # Mouse left/right -> Z axis rotation
+        self.rotation_z_axis -= dy * sensitivity  # Mouse up/down -> Z axis rotation
+        self.rotation_y_axis -= dx * sensitivity  # Mouse left/right -> Y axis rotation
 
         # Apply rotation
         self._apply_base_rotation_only()
