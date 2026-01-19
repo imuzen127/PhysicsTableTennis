@@ -348,8 +348,15 @@ class PlayMode:
         old_pos = self.racket.position.copy()
         position_delta = current_pos - old_pos
         # Estimate velocity based on ~60fps (0.016s per frame)
-        vel_scale = 60.0  # Convert position delta to velocity
-        self.racket.velocity = position_delta * vel_scale
+        vel_scale = 40.0  # Convert position delta to velocity (reduced from 60)
+        raw_velocity = position_delta * vel_scale
+        # Cap velocity to reasonable table tennis speeds (max ~12 m/s for normal play)
+        speed = np.linalg.norm(raw_velocity)
+        max_speed = 12.0
+        if speed > max_speed:
+            self.racket.velocity = raw_velocity * (max_speed / speed)
+        else:
+            self.racket.velocity = raw_velocity
 
         # Save previous position for swept collision detection
         self.racket.prev_position = old_pos
@@ -442,43 +449,10 @@ class PlayMode:
         self._apply_base_rotation_only()
 
     def _apply_swing_motion(self):
-        """Apply continuous swing motion during drag - adjusts rotation2 based on swing direction"""
-        if len(self.swing_history) < 2:
-            return
-
-        # Get recent movement from swing history
-        _, pos1 = self.swing_history[-2]
-        _, pos2 = self.swing_history[-1]
-
-        # Calculate movement delta
-        dx = pos2[0] - pos1[0]  # Horizontal movement (left-right)
-        dy = pos2[1] - pos1[1]  # Vertical movement (up-down)
-
-        if not self.racket:
-            return
-
-        speed = math.sqrt(dx * dx + dy * dy)
-
-        # Apply rotation2 based on swing direction (only for fast swings)
-        if speed > 2.0:  # Higher threshold - slow swings don't change angle
-            # Calculate tilt amount - more sensitive to horizontal movement
-            # Max tilt ~45 degrees (0.785 rad) for fast swings
-            max_tilt = 0.785
-            tilt_amount = min(max_tilt, speed * 0.05)  # Increased sensitivity
-
-            # Horizontal swing determines left/right angle
-            horizontal_factor = dx / speed  # -1 to 1
-
-            # Apply rotation2 around local Y-axis
-            self.racket.orientation_angle2 = tilt_amount * horizontal_factor
-            self.racket.orientation_axis2 = np.array([0.0, 1.0, 0.0])
-
-            # Apply velocity based on side for physics
-            vel_scale = 0.02
-            if self.side == 1:
-                self.racket.velocity = np.array([dy * vel_scale, 0.0, dx * vel_scale])
-            else:
-                self.racket.velocity = np.array([-dy * vel_scale, 0.0, -dx * vel_scale])
+        """Track swing motion for physics - does NOT change racket angle"""
+        # Angle is controlled only by right-click drag
+        # This function is kept for compatibility but does nothing
+        pass
 
     def _update_auto_height(self):
         """Auto-adjust racket Y to match ball Y position (only for approaching balls)"""
