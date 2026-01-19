@@ -1408,10 +1408,24 @@ class GameWorld:
             self._debug_log(f"SUMMON {args['entity']} id={entity.id} pos=({pos[0]:.2f},{pos[1]:.2f},{pos[2]:.2f}) nbt_Tags={nbt_tags} -> entity_tags={entity_tags} vel={vel_actual}")
             self.add_output(f"Summoned {args['entity']} [{entity.id}]")
 
-            # If recording, assign tag to new entity (will be captured in next frame)
+            # If recording, assign tag and capture exact spawn data
             if self.recording_active:
                 entity_type = args['entity']
                 self._recording_assign_tag(entity, entity_type)
+                # Store exact spawn data for balls (position and velocity at spawn moment)
+                if entity_type == 'ball':
+                    tag = self.recording_entity_tags.get(id(entity))
+                    if tag:
+                        timestamp_ms = pygame.time.get_ticks() - self.recording_start_time
+                        if not hasattr(self, '_recording_ball_spawns'):
+                            self._recording_ball_spawns = {}
+                        self._recording_ball_spawns[tag] = {
+                            'timestamp': timestamp_ms,
+                            'position': entity.position.copy(),
+                            'velocity': entity.velocity.copy(),
+                            'spin': entity.spin.copy() if hasattr(entity, 'spin') else np.zeros(3)
+                        }
+                        self._debug_log(f"BALL_SPAWN_CAPTURED tag={tag} pos={entity.position} vel={entity.velocity}")
 
         elif cmd_type == 'kill':
             selector = result['args']['selector']
@@ -1741,6 +1755,7 @@ class GameWorld:
         self.recording_last_frame_time = self.recording_start_time
         self.recording_memo = []  # List of frame snapshots
         self._debug_ball_captured = set()  # Reset debug tracking
+        self._recording_ball_spawns = {}  # Exact spawn data for balls
 
         # Track all entities with unique tags
         self.recording_entity_tags = {}  # Maps id(entity) -> tag
@@ -1914,7 +1929,18 @@ class GameWorld:
             vel_nbt = f"velocity:{{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"
 
             if entity_type == 'ball':
-                spin = entity.get('spin', np.zeros(3))
+                # Use exact spawn data if available (captures position/velocity at spawn moment)
+                if hasattr(self, '_recording_ball_spawns') and tag in self._recording_ball_spawns:
+                    spawn_data = self._recording_ball_spawns[tag]
+                    pos = spawn_data['position']  # Override with exact spawn position
+                    spawn_vel = spawn_data['velocity']
+                    vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(spawn_vel)
+                    vel_nbt = f"velocity:{{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"
+                    spin = spawn_data.get('spin', np.zeros(3))
+                    self._debug_log(f"BALL_SUMMON_CMD using spawn data: tag={tag} pos={pos} vel={spawn_vel}")
+                else:
+                    spin = entity.get('spin', np.zeros(3))
+                    self._debug_log(f"BALL_SUMMON_CMD using frame data: tag={tag} pos={pos}")
                 nbt = f"{{Tags:[{tags_str}],{vel_nbt},spin:[{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]}}"
             elif entity_type == 'racket':
                 rot_angle = entity.get('rotation_angle', 0)
@@ -1958,7 +1984,18 @@ class GameWorld:
             vel_nbt = f"velocity:{{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"
 
             if entity_type == 'ball':
-                spin = entity.get('spin', np.zeros(3))
+                # Use exact spawn data if available (captures position/velocity at spawn moment)
+                if hasattr(self, '_recording_ball_spawns') and tag in self._recording_ball_spawns:
+                    spawn_data = self._recording_ball_spawns[tag]
+                    pos = spawn_data['position']  # Override with exact spawn position
+                    spawn_vel = spawn_data['velocity']
+                    vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(spawn_vel)
+                    vel_nbt = f"velocity:{{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"
+                    spin = spawn_data.get('spin', np.zeros(3))
+                    self._debug_log(f"BALL_SUMMON_CMD (mid-rec) using spawn data: tag={tag} pos={pos} vel={spawn_vel}")
+                else:
+                    spin = entity.get('spin', np.zeros(3))
+                    self._debug_log(f"BALL_SUMMON_CMD (mid-rec) using frame data: tag={tag} pos={pos}")
                 nbt = f"{{Tags:[{tags_str}],{vel_nbt},spin:[{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]}}"
             elif entity_type == 'racket':
                 rot_angle = entity.get('rotation_angle', 0)
