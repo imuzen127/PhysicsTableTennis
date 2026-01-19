@@ -491,6 +491,10 @@ class PlayMode:
             if not ball.active:
                 continue
 
+            # Skip serve toss ball - don't track your own toss
+            if self.serve_toss_active and ball is self.serve_ball:
+                continue
+
             # Skip balls that are clearly moving AWAY (just hit by player)
             ball_vel_x = ball.velocity[0]
             speed_threshold = 1.0  # m/s - if moving away faster than this, skip
@@ -545,7 +549,7 @@ class PlayMode:
 
         # Spawn a ball for the toss
         nbt = {
-            'velocity': np.array([0.0, 2.0, 0.0]),  # Toss up
+            'velocity': np.array([0.0, 1.2, 0.0]),  # Gentle toss up (~10cm height)
             'spin': np.zeros(3)
         }
         self.serve_ball = self.game.entity_manager.summon('ball', toss_pos, nbt)
