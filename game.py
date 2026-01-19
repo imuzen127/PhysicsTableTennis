@@ -972,11 +972,35 @@ class GameWorld:
         self.recording_tracked_entities = set()  # Set of id(entity) currently tracked
         self.recording_tag_counter = {}  # Counter for generating unique tags
 
+        # Debug logging to file
+        self.debug_log_file = None
+        self._init_debug_log()
+
         # Spawn default table at origin
         self._spawn_default_table()
 
         # Play mode system
         self.play_mode = PlayMode(self)
+
+    def _init_debug_log(self):
+        """Initialize debug log file"""
+        import os
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        log_path = os.path.join(base_path, 'debug_log.txt')
+        try:
+            self.debug_log_file = open(log_path, 'w', encoding='utf-8')
+            self._debug_log("=== Debug Log Started ===")
+        except Exception as e:
+            print(f"Could not open debug log: {e}")
+            self.debug_log_file = None
+
+    def _debug_log(self, message: str):
+        """Write debug message to log file"""
+        if self.debug_log_file:
+            import time
+            timestamp = time.strftime("%H:%M:%S")
+            self.debug_log_file.write(f"[{timestamp}] {message}\n")
+            self.debug_log_file.flush()
 
     def _init_gl(self):
         """Initialize OpenGL"""
@@ -1369,18 +1393,18 @@ class GameWorld:
         if cmd_type == 'summon':
             args = result['args']
             nbt = args['nbt']
-            # Debug: show NBT Tags before summon
-            nbt_tags = nbt.get('Tags', 'none')
             entity = self.entity_manager.summon(
                 args['entity'],
                 args['position'],
                 nbt
             )
             pos = args['position']
-            # Debug: show actual velocity and tags after summon
+            # Debug log to file
+            nbt_tags = nbt.get('Tags', 'none')
             vel_actual = entity.velocity if hasattr(entity, 'velocity') else 'none'
             entity_tags = getattr(entity, 'tags', [])
-            self.add_output(f"Summoned {args['entity']} nbt_Tags={nbt_tags} -> entity_tags={entity_tags}")
+            self._debug_log(f"SUMMON {args['entity']} id={entity.id} pos=({pos[0]:.2f},{pos[1]:.2f},{pos[2]:.2f}) nbt_Tags={nbt_tags} -> entity_tags={entity_tags} vel={vel_actual}")
+            self.add_output(f"Summoned {args['entity']} [{entity.id}]")
 
             # If recording, assign tag to new entity (will be captured in next frame)
             if self.recording_active:
@@ -1410,14 +1434,16 @@ class GameWorld:
                     entity.active = True
                     count += 1
                 self.entity_manager.simulation_running = True
+                self._debug_log(f"START selector={selector} count={count}")
                 self.add_output(f"Started {count} entities")
             else:
                 # Start all
                 self.entity_manager.start()
-                # Debug: show state after start
                 balls_active = sum(1 for b in self.entity_manager.balls if b.active)
                 balls_total = len(self.entity_manager.balls)
-                self.add_output(f"Started simulation: {balls_active}/{balls_total} balls active, running={self.entity_manager.simulation_running}")
+                rackets_total = len(self.entity_manager.rackets)
+                self._debug_log(f"START all: balls={balls_active}/{balls_total} rackets={rackets_total} running={self.entity_manager.simulation_running}")
+                self.add_output("Started simulation")
 
         elif cmd_type == 'stop':
             selector = result['args'].get('selector')
@@ -1472,15 +1498,8 @@ class GameWorld:
             if 'replay_freed' in entity_tags:
                 return
             success = self._set_entity_nbt(entity, path, value)
-            # Debug: only show first few data_modify to avoid flooding
-            if not hasattr(self, '_data_modify_count'):
-                self._data_modify_count = 0
-            self._data_modify_count += 1
-            if self._data_modify_count <= 3:
-                if success:
-                    self.add_output(f"Set {path} = {value}")
-                else:
-                    self.add_output(f"Failed to set {path}")
+            # Debug log to file (all data_modify commands)
+            self._debug_log(f"DATA_MODIFY entity={entity.id} tags={entity_tags} path={path} success={success}")
 
         elif cmd_type == 'function':
             func_name = result['args']['name']
@@ -1607,9 +1626,19 @@ class GameWorld:
                 self.add_output("Not in play mode")
 
         elif cmd_type == 'error':
-            self.add_output(result.get('message', 'Error'))
+            error_msg = result.get('message', 'Error')
+            self._debug_log(f"ERROR: {error_msg}")
+            # Only show first error in console to avoid flooding
+            if not hasattr(self, '_error_count'):
+                self._error_count = 0
+            self._error_count += 1
+            if self._error_count <= 3:
+                self.add_output(f"Error: {error_msg}")
+            elif self._error_count == 4:
+                self.add_output("(more errors in debug_log.txt)")
 
         elif cmd_type == 'unknown':
+            self._debug_log(f"UNKNOWN: {result.get('raw', '')}")
             self.add_output(f"Unknown command: {result.get('raw', '')}")
 
     def _run_function(self, func_name: str):
@@ -1640,6 +1669,8 @@ class GameWorld:
             # Record start time for this function
             self.function_start_time = pygame.time.get_ticks()
             self._data_modify_count = 0  # Reset debug counter
+            self._error_count = 0  # Reset error counter
+            self._debug_log(f"=== FUNCTION START: {func_name} ===")
 
             cmd_count = 0
             current_delay = 0  # Current delay in ms (inherited by subsequent lines)
@@ -2002,6 +2033,8 @@ class GameWorld:
 
             self.function_start_time = pygame.time.get_ticks()
             self._data_modify_count = 0  # Reset debug counter
+            self._error_count = 0  # Reset error counter
+            self._debug_log(f"=== REPLAY START: {name} ===")
             cmd_count = 0
             current_delay = 0
 
