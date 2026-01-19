@@ -1706,6 +1706,9 @@ class GameWorld:
             if table.active:
                 self._recording_register_entity(table, 'table', 0)
 
+        # Start simulation after entities are summoned
+        self.recording_data.append((0, "start"))
+
         entity_count = len(self.recording_tracked_entities)
         self.add_output(f"Recording started: {name} ({entity_count} entities)")
 
