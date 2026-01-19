@@ -128,6 +128,12 @@ class PlayMode:
         self.table = table
         self.side = side
 
+        # Add play_controlled tag to prevent replay commands from affecting this racket
+        if not hasattr(racket, 'tags'):
+            racket.tags = []
+        if 'play_controlled' not in racket.tags:
+            racket.tags.append('play_controlled')
+
         # Calculate fixed camera position
         side_config = self.SIDE_POSITIONS[side]
         table_pos = table.position
@@ -167,6 +173,10 @@ class PlayMode:
 
     def exit(self):
         """Exit play mode"""
+        # Remove play_controlled tag from racket
+        if self.racket and hasattr(self.racket, 'tags') and 'play_controlled' in self.racket.tags:
+            self.racket.tags.remove('play_controlled')
+
         self.active = False
         self.mode = None
         self.racket = None
@@ -324,7 +334,11 @@ class PlayMode:
         current_pos = self.racket.position.copy()
 
         # Mouse X movement -> World Z (left-right from player view)
-        current_pos[2] += dx * sensitivity
+        # Side 2 is facing opposite direction, so invert Z movement
+        if self.side == 1:
+            current_pos[2] += dx * sensitivity
+        else:
+            current_pos[2] -= dx * sensitivity
 
         # Mouse Y movement -> World X (forward-back)
         if self.side == 1:
