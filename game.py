@@ -1907,17 +1907,9 @@ class GameWorld:
 
     def _record_entity_states(self, delay_ms: int):
         """Record state changes for all tracked entities"""
-        # Record balls
-        for ball in self.entity_manager.balls:
-            if ball.active and id(ball) in self.recording_entity_tags:
-                tag = self.recording_entity_tags[id(ball)]
-                selector = f"@e[tag={tag}]"
-                pos = ball.position
-                vel = ball.velocity
-                spin = ball.spin
-                self.recording_data.append((delay_ms, f"data modify entity {selector} pos set value [{pos[0]:.4f},{pos[1]:.4f},{pos[2]:.4f}]"))
-                self.recording_data.append((delay_ms, f"data modify entity {selector} velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"))
-                self.recording_data.append((delay_ms, f"data modify entity {selector} spin set value [{spin[0]:.1f},{spin[1]:.1f},{spin[2]:.1f}]"))
+        # Balls: Don't record position/velocity/spin updates
+        # Physics simulation handles ball movement from initial state (summon)
+        # This allows balls to interact with player-controlled rackets during replay
 
         # Record rackets
         for racket in self.entity_manager.rackets:
