@@ -87,13 +87,13 @@ class PlayMode:
         self.swing_history = []  # Track mouse positions for swing curve analysis
         self.is_swinging = False
 
-        # Right mouse button state (spin control - spherical rotation)
+        # Right mouse button state (spin control - angle/axis method)
         self.right_mouse_down = False
         self.right_mouse_start_pos = (0, 0)
         self.right_mouse_last_pos = (0, 0)
-        # Spherical rotation angles (no limits)
-        self.spin_pitch_offset = 0.0  # Vertical tilt (mouse Y drag)
-        self.spin_yaw_offset = 0.0    # Horizontal rotation (mouse X drag)
+        # Angle/axis rotation control
+        self.angle_axis_direction = 0.0  # Direction of tilt axis (mouse X)
+        self.angle_axis_amount = 0.0     # Amount of tilt (mouse Y)
 
         # Double-click detection for serve toss
         self.last_click_time = 0
@@ -161,9 +161,9 @@ class PlayMode:
         self.is_swinging = False
         self.serve_ready = False
         self.serve_toss_active = False
-        # Reset spherical rotation angles
-        self.spin_pitch_offset = 0.0
-        self.spin_yaw_offset = 0.0
+        # Reset angle/axis rotation
+        self.angle_axis_direction = 0.0
+        self.angle_axis_amount = 0.0
 
     def exit(self):
         """Exit play mode"""
@@ -366,19 +366,24 @@ class PlayMode:
         self._apply_base_rotation_only()
 
     def _apply_base_rotation_only(self):
-        """Apply base rotation with spherical angle adjustments (pitch/yaw)"""
+        """Apply base rotation with angle/axis adjustments"""
         if not self.racket or not self.side:
             return
 
         rot_config = self.RACKET_ROTATIONS[self.side]
-        # Base rotation (to face opponent) + pitch offset (vertical tilt)
-        self.racket.orientation_angle = rot_config['angle'] + self.spin_pitch_offset
+        # Base rotation (to face opponent)
+        self.racket.orientation_angle = rot_config['angle']
         self.racket.orientation_axis = rot_config['axis'].copy()
 
-        # Yaw rotation (horizontal spin) using rotation2
-        # Y-axis rotation for horizontal adjustment
-        self.racket.orientation_angle2 = self.spin_yaw_offset
-        self.racket.orientation_axis2 = np.array([0.0, 1.0, 0.0])
+        # Angle/axis tilt using rotation2
+        # Axis is in XZ plane, direction controlled by mouse X
+        tilt_axis = np.array([
+            np.cos(self.angle_axis_direction),
+            0.0,
+            np.sin(self.angle_axis_direction)
+        ])
+        self.racket.orientation_angle2 = self.angle_axis_amount
+        self.racket.orientation_axis2 = tilt_axis
 
     def _apply_racket_orientation(self):
         """Apply full racket orientation (both rotation and rotation2)"""
@@ -386,13 +391,18 @@ class PlayMode:
             return
 
         rot_config = self.RACKET_ROTATIONS[self.side]
-        # Base rotation + pitch
-        self.racket.orientation_angle = rot_config['angle'] + self.spin_pitch_offset
+        # Base rotation
+        self.racket.orientation_angle = rot_config['angle']
         self.racket.orientation_axis = rot_config['axis'].copy()
 
-        # Yaw rotation (horizontal spin)
-        self.racket.orientation_angle2 = self.spin_yaw_offset
-        self.racket.orientation_axis2 = np.array([0.0, 1.0, 0.0])
+        # Angle/axis tilt
+        tilt_axis = np.array([
+            np.cos(self.angle_axis_direction),
+            0.0,
+            np.sin(self.angle_axis_direction)
+        ])
+        self.racket.orientation_angle2 = self.angle_axis_amount
+        self.racket.orientation_axis2 = tilt_axis
 
     def _update_racket_position(self, x_offset, z_offset):
         """Update racket world position (used for initial positioning)"""
@@ -429,21 +439,21 @@ class PlayMode:
         self._apply_racket_orientation()
 
     def _adjust_racket_angle(self, dx, dy):
-        """Adjust racket angle based on right-click drag (spherical rotation)
+        """Adjust racket angle based on right-click drag (angle/axis method)
 
-        dx > 0 (drag right) -> rotate racket horizontally (yaw)
-        dy > 0 (drag down) -> tilt racket forward (pitch)
-        No angle limits - full 360 degree rotation like a globe
+        dx > 0 (drag right) -> change tilt direction (rotate axis around Y)
+        dy > 0 (drag down) -> increase tilt amount
         """
         if not self.racket:
             return
 
         # Sensitivity for angle adjustment
-        sensitivity = 0.008
+        direction_sensitivity = 0.01
+        amount_sensitivity = 0.008
 
-        # Update spherical angles (no limits)
-        self.spin_yaw_offset -= dx * sensitivity    # Horizontal rotation (inverted for natural feel)
-        self.spin_pitch_offset -= dy * sensitivity  # Vertical tilt
+        # Update angle/axis values
+        self.angle_axis_direction -= dx * direction_sensitivity  # Which way to tilt
+        self.angle_axis_amount -= dy * amount_sensitivity        # How much to tilt
 
         # Apply rotation
         self._apply_base_rotation_only()
@@ -460,9 +470,9 @@ class PlayMode:
             return
 
         # Use game's side button state for height control
-        height_speed = 0.015  # Height change per frame
+        height_speed = 0.008  # Height change per frame (reduced)
         min_y = self.table.height + 0.19
-        max_y = self.table.height + 1.5
+        max_y = self.table.height + 2.5  # Increased limit
 
         if self.game.mouse_side2_held:  # Side button 2 = up
             self.racket.position[1] = min(max_y, self.racket.position[1] + height_speed)
