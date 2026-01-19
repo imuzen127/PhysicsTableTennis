@@ -2011,9 +2011,10 @@ class GameWorld:
             if racket.active and id(racket) in self.recording_entity_tags:
                 tag = self.recording_entity_tags[id(racket)]
                 selector = f"@e[tag={tag}]"
-                vel = racket.velocity
-                self.recording_data.append((delay_ms, f"data modify entity {selector} velocity set value [{vel[0]:.4f},{vel[1]:.4f},{vel[2]:.4f}]"))
-                self.recording_data.append((delay_ms, f"data modify entity {selector} rotation set value [{racket.orientation_angle:.4f},{racket.orientation_axis[0]:.4f},{racket.orientation_axis[1]:.4f},{racket.orientation_axis[2]:.4f}]"))
+                # Convert velocity to angle/axis/speed format
+                vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(racket.velocity)
+                self.recording_data.append((delay_ms, f"data modify entity {selector} velocity set value {{angle:{vel_angle:.4f},axis:[{vel_axis[0]:.4f},{vel_axis[1]:.4f},{vel_axis[2]:.4f}],speed:{vel_speed:.4f}}}"))
+                self.recording_data.append((delay_ms, f"data modify entity {selector} rotation set value {{angle:{racket.orientation_angle:.4f},axis:[{racket.orientation_axis[0]:.4f},{racket.orientation_axis[1]:.4f},{racket.orientation_axis[2]:.4f}]}}"))
                 # Record secondary rotation (used in play mode for Y-axis rotation)
                 if hasattr(racket, 'orientation_angle2'):
                     axis2 = racket.orientation_axis2

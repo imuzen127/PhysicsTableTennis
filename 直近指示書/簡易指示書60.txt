@@ -1,0 +1,22 @@
+あれ？直してって言ったのに直してないじゃないか。
+
+kill @e[type=ball]
+kill @e[type=racket]
+summon racket -1.5780 1.0580 0.0080 {Tags:["rake","play_controlled","rec_racket_0"],velocity:{angle:0.0000,axis:[0.0000,1.0000,0.0000],speed:0.0000},rotation:{angle:1.5700,axis:[0.0000,0.0000,-1.0000]},rotation2:{angle:0.0000,axis:[0.0000,1.0000,0.0000]}}
+summon racket 1.5100 1.1000 -0.5300 {Tags:["rake2","rec_racket_1"],velocity:{angle:0.0000,axis:[0.0000,1.0000,0.0000],speed:0.0000},rotation:{angle:1.5700,axis:[0.0000,0.0000,1.0000]},rotation2:{angle:0.7850,axis:[0.0000,-1.0000,0.0000]}}
+summon table 0.0000 0.0000 0.0000 {Tags:["rec_table_0"]}
+start
+17;data modify entity @e[tag=rec_racket_0] velocity set value [0.0000,0.0000,0.0000]
+17;data modify entity @e[tag=rec_racket_0] rotation set value [1.5700,0.0000,0.0000,-1.0000]
+17;data modify entity @e[tag=rec_racket_0] rotation2 set value {angle:0.0000,axis:[0.0000,1.0000,0.0000]}
+17;data modify entity @e[tag=rec_racket_1] velocity set value [0.0000,0.0000,0.0000]
+17;data modify entity @e[tag=rec_racket_1] rotation set value [1.5700,0.0000,0.0000,1.0000]
+17;data modify entity @e[tag=rec_racket_1] rotation2 set value {angle:0.7850,axis:[0.0000,-1.0000,0.0000]}
+33;data modify entity @e[tag=rec_racket_0] velocity set value [0.0000,0.0000,0.0000]
+33;data modify entity @e[tag=rec_racket_0] rotation set value [1.5700,0.0000,0.0000,-1.0000]
+33;data modify entity @e[tag=rec_racket_0] rotation2 set value {angle:0.0000,axis:[0.0000,1.0000,0.0000]}
+33;data modify entity @e[tag=rec_racket_1] velocity set value [0.0000,0.0000,0.0000]
+33;data modify entity @e[tag=rec_racket_1] rotation set value [1.5700,0.0000,0.0000,1.0000]
+33;data modify entity @e[tag=rec_racket_1] rotation2 set value {angle:0.7850,axis:[0.0000,-1.0000,0.0000]}
+
+最初のvelocityだけ直しても意味ないぞ。modifyではそのままじゃないか。
