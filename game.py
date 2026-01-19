@@ -1896,7 +1896,8 @@ class GameWorld:
             entity_type = entity['type']
             pos = entity['position']
             tags = entity.get('tags', [])
-            all_tags = [t for t in tags if not t.startswith('rec_')] + [tag]
+            # Filter out rec_ prefix tags and play_controlled (replay should control all entities)
+            all_tags = [t for t in tags if not t.startswith('rec_') and t != 'play_controlled'] + [tag]
             tags_str = ','.join(f'"{t}"' for t in all_tags)
 
             # Calculate initial velocity from position change to next frame
@@ -1944,7 +1945,8 @@ class GameWorld:
             entity_type = entity['type']
             pos = entity['position']
             tags = entity.get('tags', [])
-            all_tags = [t for t in tags if not t.startswith('rec_')] + [tag]
+            # Filter out rec_ prefix tags and play_controlled (replay should control all entities)
+            all_tags = [t for t in tags if not t.startswith('rec_') and t != 'play_controlled'] + [tag]
             tags_str = ','.join(f'"{t}"' for t in all_tags)
 
             # Calculate initial velocity from position change to next frame
