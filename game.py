@@ -95,13 +95,9 @@ class PlayMode:
         self.spin_pitch_offset = 0.0  # Vertical tilt (mouse Y drag)
         self.spin_yaw_offset = 0.0    # Horizontal rotation (mouse X drag)
 
-        # Double-click detection for serve toss (left) and auto-height toggle (right)
+        # Double-click detection for serve toss
         self.last_click_time = 0
-        self.last_right_click_time = 0
         self.double_click_threshold = 300  # ms
-
-        # Auto height adjustment toggle (default OFF)
-        self.auto_height_enabled = False
 
         # Serve state
         self.serve_ready = False
@@ -187,8 +183,8 @@ class PlayMode:
             # Apply swing velocity to racket
             self._apply_swing_motion()
 
-        # Auto height adjustment - match ball Y position
-        self._update_auto_height()
+        # Manual height adjustment via side buttons
+        self._update_manual_height()
 
         # Check serve timeout in auto mode
         if self.mode == 'auto' and self.serve_ready:
@@ -232,16 +228,7 @@ class PlayMode:
             self.swing_history = [(current_time, pos)]
             return True
 
-        elif button == 3:  # Right button - spin control or toggle auto-height
-            # Check for double-click to toggle auto-height
-            if current_time - self.last_right_click_time < self.double_click_threshold:
-                self.auto_height_enabled = not self.auto_height_enabled
-                status = "ON" if self.auto_height_enabled else "OFF"
-                self.game.add_output(f"Auto height: {status}")
-                self.last_right_click_time = 0  # Reset to prevent triple-click
-                return True
-
-            self.last_right_click_time = current_time
+        elif button == 3:  # Right button - spin control
             self.right_mouse_down = True
             self.right_mouse_start_pos = pos
             self.right_mouse_last_pos = pos
@@ -328,7 +315,7 @@ class PlayMode:
         self.drag_last_mouse_pos = mouse_pos
 
         # Sensitivity for mouse-to-world movement
-        sensitivity = 0.003  # Adjust as needed
+        sensitivity = 0.002  # Reduced for smoother control
 
         table_pos = self.table.position
         net_x = table_pos[0]
@@ -467,67 +454,20 @@ class PlayMode:
         # This function is kept for compatibility but does nothing
         pass
 
-    def _update_auto_height(self):
-        """Auto-adjust racket Y to match ball Y position (only for approaching balls)"""
-        # Check if auto-height is enabled (toggle with right double-click)
-        if not self.auto_height_enabled:
-            return
-
+    def _update_manual_height(self):
+        """Manual racket height adjustment via mouse side buttons"""
         if not self.table or not self.racket:
             return
 
-        # Check if any ball was recently hit - if so, pause auto height
-        physics_time = getattr(self.game.entity_manager, '_physics_time', 0)
-        hit_pause_duration = 0.5  # 500ms pause after hitting
-        for ball in self.game.entity_manager.balls:
-            last_hit = getattr(ball, 'last_racket_hit_time', -1)
-            if last_hit > 0 and physics_time - last_hit < hit_pause_duration:
-                return  # Don't adjust height right after hitting
+        # Use game's side button state for height control
+        height_speed = 0.015  # Height change per frame
+        min_y = self.table.height + 0.19
+        max_y = self.table.height + 1.5
 
-        # Find closest active ball that is APPROACHING (not moving away after hit)
-        closest_ball = None
-        closest_dist = float('inf')
-
-        for ball in self.game.entity_manager.balls:
-            if not ball.active:
-                continue
-
-            # Skip serve toss ball - don't track your own toss
-            if self.serve_toss_active and ball is self.serve_ball:
-                continue
-
-            # Skip balls that are clearly moving AWAY (just hit by player)
-            ball_vel_x = ball.velocity[0]
-            speed_threshold = 1.0  # m/s - if moving away faster than this, skip
-            if self.side == 1:
-                # Side 1 at -X: ball moving away if going toward +X fast
-                is_moving_away = ball_vel_x > speed_threshold
-            else:
-                # Side 2 at +X: ball moving away if going toward -X fast
-                is_moving_away = ball_vel_x < -speed_threshold
-
-            if is_moving_away:
-                continue  # Skip balls moving away fast (just hit)
-
-            dist = np.linalg.norm(ball.position - self.racket.position)
-            if dist < closest_dist:
-                closest_dist = dist
-                closest_ball = ball
-
-        # Match racket Y to ball Y
-        if closest_ball and closest_dist < 2.0:  # Ball is within range
-            target_y = closest_ball.position[1]
-
-            # Smooth transition
-            current_y = self.racket.position[1]
-            smooth_speed = 0.2  # Slower tracking
-            new_y = current_y + (target_y - current_y) * smooth_speed
-
-            # Clamp to reasonable range (above table surface)
-            # min_y includes half racket length + margin to prevent table clipping
-            min_y = self.table.height + 0.19
-            max_y = self.table.height + 1.0
-            self.racket.position[1] = max(min_y, min(max_y, new_y))
+        if self.game.mouse_side2_held:  # Side button 2 = up
+            self.racket.position[1] = min(max_y, self.racket.position[1] + height_speed)
+        if self.game.mouse_side1_held:  # Side button 1 = down
+            self.racket.position[1] = max(min_y, self.racket.position[1] - height_speed)
 
     def _start_serve_toss(self):
         """Start serve toss (double-click) - works in both free and auto mode"""
@@ -2110,6 +2050,11 @@ class GameWorld:
                 elif self.play_mode.active:
                     # Play mode mouse handling
                     self.play_mode.handle_mouse_down(event.button, event.pos)
+                    # Side buttons for racket height in play mode
+                    if event.button == 7:
+                        self.mouse_side1_held = True  # down
+                    elif event.button == 6:
+                        self.mouse_side2_held = True  # up
                 else:
                     # Debug: show button number for non-standard buttons
                     if event.button not in [1, 2, 3]:
@@ -2132,6 +2077,11 @@ class GameWorld:
             elif event.type == MOUSEBUTTONUP:
                 if self.play_mode.active:
                     self.play_mode.handle_mouse_up(event.button, event.pos)
+                    # Side buttons for racket height in play mode
+                    if event.button == 7:
+                        self.mouse_side1_held = False
+                    elif event.button == 6:
+                        self.mouse_side2_held = False
                 elif event.button == 7:
                     self.mouse_side1_held = False
                 elif event.button == 6:
@@ -2183,27 +2133,6 @@ class GameWorld:
         else:
             hint = self.font_small.render("/ - Chat    ESC - Menu", True, (180, 180, 180))
             hud.blit(hint, (15, self.height - 28))
-
-        # Entity status (show first active ball)
-        active_balls = [b for b in self.entity_manager.balls if b.active]
-        if active_balls:
-            ball = active_balls[0]
-            speed = np.linalg.norm(ball.velocity)
-            rpm = np.linalg.norm(ball.spin) * 60 / (2 * math.pi)
-            pos = ball.position
-            lines = [
-                f"Speed: {speed:.1f} m/s",
-                f"Spin: {rpm:.0f} RPM",
-                f"Height: {pos[1]:.2f} m",
-                f"Balls: {len(active_balls)}"
-            ]
-            y = 15
-            for line in lines:
-                shadow = self.font_medium.render(line, True, (0, 0, 0))
-                text = self.font_medium.render(line, True, (255, 255, 100))
-                hud.blit(shadow, (self.width - 178, y + 2))
-                hud.blit(text, (self.width - 180, y))
-                y += 28
 
         # F3 Debug screen (Minecraft-style)
         if self.show_debug and not self.menu_open:
