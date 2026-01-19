@@ -1455,8 +1455,12 @@ class GameWorld:
             entity = args['entity']
             path = args['path']
             value = args['value']
+            entity_tags = getattr(entity, 'tags', [])
             # Skip play_controlled entities (don't let replay modify player-controlled rackets)
-            if 'play_controlled' in getattr(entity, 'tags', []):
+            if 'play_controlled' in entity_tags:
+                return
+            # Skip replay_freed entities (balls hit by play_controlled racket return to physics)
+            if 'replay_freed' in entity_tags:
                 return
             success = self._set_entity_nbt(entity, path, value)
             if success:

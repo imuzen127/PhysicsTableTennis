@@ -1097,6 +1097,17 @@ class EntityManager:
             return  # No collision
 
         # === COLLISION DETECTED - Apply physics ===
+
+        # If racket has play_controlled tag, free ball from replay control
+        # This allows the ball to follow physics instead of replay commands
+        racket_tags = getattr(racket, 'tags', [])
+        if 'play_controlled' in racket_tags:
+            ball_tags = getattr(ball, 'tags', [])
+            if not hasattr(ball, 'tags'):
+                ball.tags = []
+            if 'replay_freed' not in ball.tags:
+                ball.tags.append('replay_freed')
+
         # Determine which side was hit
         if crossed_plane:
             is_red_side = crossed_from_plus  # Came from +Y side = red
