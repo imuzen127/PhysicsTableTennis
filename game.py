@@ -1727,6 +1727,8 @@ class GameWorld:
             with open(func_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
 
+            # Clear any pending commands from previous function to prevent interference
+            self.scheduled_commands = []
             # Record start time for this function
             self.function_start_time = pygame.time.get_ticks()
             self._data_modify_count = 0  # Reset debug counter
@@ -2315,6 +2317,8 @@ class GameWorld:
             with open(file_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
 
+            # Clear any pending commands from previous replay to prevent interference
+            self.scheduled_commands = []
             self.function_start_time = pygame.time.get_ticks()
             self._data_modify_count = 0  # Reset debug counter
             self._error_count = 0  # Reset error counter
