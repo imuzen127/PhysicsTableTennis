@@ -1783,11 +1783,15 @@ class GameWorld:
         entities = self.command_parser._resolve_selector_multiple(selector)
         racket = None
         for e in entities:
-            if hasattr(e, 'entity_type') and e.entity_type == 'racket':
+            # entity_type is an enum with .value property
+            etype = getattr(e, 'entity_type', None)
+            etype_str = etype.value if hasattr(etype, 'value') else str(etype)
+            if etype_str == 'racket':
                 racket = e
                 break
 
         if not racket:
+            self._debug_log(f"TOSS_ERROR: No racket found for {selector}, entities found: {[(getattr(e, 'entity_type', None), getattr(e, 'tags', [])) for e in entities]}")
             self.add_output(f"No racket found for: {selector}")
             return
 
