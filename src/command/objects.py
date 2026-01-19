@@ -522,6 +522,9 @@ class EntityManager:
         """
         Update all entities for one time step.
 
+        Uses sub-stepping to prevent tunnel effect (ball/racket penetration)
+        when racket moves fast in play mode.
+
         Args:
             dt: Time step in seconds
             physics_params: Physics parameters from game
@@ -532,26 +535,65 @@ class EntityManager:
         # Track physics time for collision cooldowns
         if not hasattr(self, '_physics_time'):
             self._physics_time = 0.0
-        self._physics_time += dt
 
-        # Save previous positions for swept collision detection
+        # Sub-stepping: divide update into smaller steps for accurate collision
+        num_substeps = 4
+        sub_dt = dt / num_substeps
+
+        # Save initial positions for interpolation
+        # For manual control rackets (play mode), we interpolate from prev to current
+        racket_start_positions = {}
+        racket_end_positions = {}
+        for racket in self.rackets:
+            if racket.manual_control:
+                # In play mode, prev_position and position are set externally
+                # We need to interpolate between them
+                start_pos = racket.prev_position.copy() if hasattr(racket, 'prev_position') else racket.position.copy()
+                racket_start_positions[id(racket)] = start_pos
+                racket_end_positions[id(racket)] = racket.position.copy()
+                # Reset to start for interpolation
+                racket.position = start_pos.copy()
+
+        # Save ball starting positions
         for ball in self.balls:
             ball.prev_position = ball.position.copy()
+
+        # Save non-manual racket positions
         for racket in self.rackets:
-            racket.prev_position = racket.position.copy()
+            if not racket.manual_control:
+                racket.prev_position = racket.position.copy()
 
-        # Update rackets (swing motion)
+        # Sub-stepping loop
+        for substep in range(num_substeps):
+            self._physics_time += sub_dt
+            alpha = (substep + 1) / num_substeps
+
+            # Interpolate manual control racket positions
+            for racket in self.rackets:
+                if racket.manual_control and id(racket) in racket_start_positions:
+                    racket.prev_position = racket.position.copy()
+                    start = racket_start_positions[id(racket)]
+                    end = racket_end_positions[id(racket)]
+                    racket.position = start + (end - start) * alpha
+
+            # Update non-manual rackets (swing motion)
+            for racket in self.rackets:
+                if racket.active and racket.swing_active and not racket.manual_control:
+                    self._update_racket(racket, sub_dt)
+
+            # Update balls
+            for ball in self.balls:
+                if ball.active:
+                    ball.prev_position = ball.position.copy()
+                    self._update_ball(ball, sub_dt, physics_params)
+
+            # Check collisions at each substep
+            self._check_collisions(physics_params)
+
+        # Ensure final positions are correct for manual control rackets
         for racket in self.rackets:
-            if racket.active and racket.swing_active:
-                self._update_racket(racket, dt)
-
-        # Update balls
-        for ball in self.balls:
-            if ball.active:
-                self._update_ball(ball, dt, physics_params)
-
-        # Check collisions
-        self._check_collisions(physics_params)
+            if racket.manual_control and id(racket) in racket_end_positions:
+                racket.position = racket_end_positions[id(racket)]
 
     def _update_racket(self, racket: RacketEntity, dt: float):
         """Update racket position during swing"""
