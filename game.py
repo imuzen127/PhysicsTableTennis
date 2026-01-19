@@ -658,46 +658,22 @@ class PlayMode:
         return dy > 20  # Threshold for pull-back detection
 
     def _apply_swing_to_racket(self, swing_data):
-        """Apply swing analysis to racket orientation using rotation2"""
+        """Apply swing velocity for physics - does NOT change racket angle"""
+        # Angle is controlled only by right-click drag
+        # This function only updates velocity for collision physics
         if not self.racket:
             return
 
         direction = swing_data['direction']
         speed = swing_data['speed']
-        curve = swing_data['curve']
 
-        if speed < 50:  # Too slow for significant angle change
-            # Reset rotation2
-            self.racket.orientation_angle2 = 0.0
+        if speed < 50:
             return
 
-        # Calculate racket tilt based on swing direction
         dx, dy = direction
-
-        # Calculate tilt amount based on swing speed (max ~45 degrees = 0.785 rad)
-        tilt_amount = min(0.785, speed / 500.0)
-
-        # Use rotation2 with Y-axis for left/right swing direction
-        # Based on user's findings:
-        # - axis [0, 1, 0] with positive angle = right tilt
-        # - axis [0, 1, 0] with negative angle = left tilt
-        # Screen X movement (dx) determines left/right direction
-
-        # Normalize by swing distance to get direction
         dist = math.sqrt(dx * dx + dy * dy)
         if dist > 0:
-            # Primary direction is horizontal (left-right swing)
-            # dx > 0 = swing to right on screen = tilt right
-            # dx < 0 = swing to left on screen = tilt left
-            horizontal_factor = dx / dist  # -1 to 1
-
-            # Apply rotation2 around local Y-axis
-            self.racket.orientation_angle2 = tilt_amount * horizontal_factor
-            self.racket.orientation_axis2 = np.array([0.0, 1.0, 0.0])
-
-            # Adjust racket velocity based on swing for physics
-            # Horizontal swing affects Z velocity (left/right on table)
-            # Vertical swing affects X velocity (forward/back)
+            # Set velocity based on swing direction for physics calculations
             vel_scale = speed * 0.002
             if self.side == 1:
                 self.racket.velocity = np.array([dy * vel_scale, 0.0, dx * vel_scale])
