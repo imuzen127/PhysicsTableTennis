@@ -2079,7 +2079,8 @@ class GameWorld:
                 if 'rotation2_angle' in entity:
                     rot2_axis = entity.get('rotation2_axis', [0, 1, 0])
                     rot2_nbt = f",rotation2:{{angle:{entity['rotation2_angle']:.4f},axis:[{rot2_axis[0]:.4f},{rot2_axis[1]:.4f},{rot2_axis[2]:.4f}]}}"
-                nbt = f"{{Tags:[{tags_str}],{vel_nbt},{rot_nbt}{rot2_nbt}}}"
+                # manual_control:1b enables swept collision detection (interpolation between prev_position and position)
+                nbt = f"{{Tags:[{tags_str}],{vel_nbt},{rot_nbt}{rot2_nbt},manual_control:1b}}"
             elif entity_type == 'table':
                 nbt = f"{{Tags:[{tags_str}]}}"
             else:
