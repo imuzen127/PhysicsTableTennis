@@ -2147,8 +2147,21 @@ class GameWorld:
                 if entity_type == 'ball':
                     continue
 
-                # Calculate velocity from position change
-                vel = (entity['position'] - prev_entity['position']) / dt
+                # Calculate velocity for NEXT interval (from current frame to next frame)
+                # This is the velocity needed to move FROM this position TO the next position
+                next_frame = self.recording_memo[i + 1] if i + 1 < len(self.recording_memo) else None
+                next_entity = get_entity_by_tag(next_frame, tag) if next_frame else None
+
+                if next_entity:
+                    next_dt = (next_frame['timestamp'] - frame['timestamp']) / 1000.0
+                    if next_dt > 0:
+                        vel = (next_entity['position'] - entity['position']) / next_dt
+                    else:
+                        vel = np.zeros(3)
+                else:
+                    # Last frame - stop moving
+                    vel = np.zeros(3)
+
                 vel_angle, vel_axis, vel_speed = self._velocity_to_angle_axis_speed(vel)
 
                 # Record velocity change
