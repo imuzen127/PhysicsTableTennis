@@ -523,6 +523,28 @@ class PlayMode:
         self.serve_ready = True
         self.serve_time_start = pygame.time.get_ticks()
 
+        # If recording, assign ball tag and store racket selector for replay with /toss command
+        if self.game.recording_active:
+            # Assign recording tag to the ball (since we bypassed command handler)
+            self.game._recording_assign_tag(self.serve_ball, 'ball')
+
+            # Find the racket's recording tag
+            racket_tag = self.game.recording_entity_tags.get(id(self.racket))
+            ball_tag = self.game.recording_entity_tags.get(id(self.serve_ball))
+
+            if racket_tag and ball_tag:
+                if not hasattr(self.game, '_recording_ball_spawns'):
+                    self.game._recording_ball_spawns = {}
+                timestamp_ms = pygame.time.get_ticks() - self.game.recording_start_time
+                self.game._recording_ball_spawns[ball_tag] = {
+                    'timestamp': timestamp_ms,
+                    'position': self.serve_ball.position.copy(),
+                    'velocity': self.serve_ball.velocity.copy(),
+                    'spin': self.serve_ball.spin.copy() if hasattr(self.serve_ball, 'spin') else np.zeros(3),
+                    'racket_selector': f"@e[tag={racket_tag}]"
+                }
+                self.game._debug_log(f"SERVE_TOSS_RECORDED: ball_tag={ball_tag} racket_tag={racket_tag}")
+
         self.game.add_output("Serve toss!")
 
     def _update_serve_toss(self):
@@ -1382,6 +1404,14 @@ class GameWorld:
                 else:
                     self.add_output("Usage: /replay <name>")
 
+            elif command == 'toss':
+                # Serve toss for a specified racket: /toss @e[tag=rec_racket_0]
+                if args:
+                    selector = ' '.join(cmd_original.split()[1:])  # Preserve original case for selector
+                    self._toss_for_racket(selector)
+                else:
+                    self.add_output("Usage: /toss <racket_selector>")
+
             else:
                 self.add_output(f"Unknown: {command}")
 
@@ -1747,6 +1777,60 @@ class GameWorld:
 
         self.scheduled_commands = still_pending
 
+    def _toss_for_racket(self, selector: str):
+        """Serve toss for a specified racket - creates ball relative to racket position"""
+        # Resolve selector to find racket
+        entities = self.command_parser._resolve_selector_multiple(selector)
+        racket = None
+        for e in entities:
+            if hasattr(e, 'entity_type') and e.entity_type == 'racket':
+                racket = e
+                break
+
+        if not racket:
+            self.add_output(f"No racket found for: {selector}")
+            return
+
+        # Calculate toss position relative to racket (same logic as PlayMode._start_serve_toss)
+        toss_pos = racket.position.copy()
+        toss_pos[1] += 0.05  # Start slightly above racket
+
+        # Determine side based on racket X position (negative = side 1, positive = side 2)
+        if racket.position[0] < 0:
+            # Side 1: move toward net (+X direction)
+            toss_pos[0] += 0.04
+        else:
+            # Side 2: move toward net (-X direction)
+            toss_pos[0] -= 0.04
+
+        # Spawn ball with upward velocity (same as serve toss)
+        nbt = {
+            'velocity': np.array([0.0, 1.8, 0.0]),  # Toss up
+            'spin': np.zeros(3)
+        }
+
+        self._debug_log(f"TOSS command: racket={selector} pos={racket.position} toss_pos={toss_pos}")
+        ball = self.entity_manager.summon('ball', toss_pos, nbt)
+        ball.active = True
+        ball.spawn_time = self.entity_manager._physics_time if hasattr(self.entity_manager, '_physics_time') else 0
+
+        self.add_output(f"Toss! (racket: {selector})")
+
+        # If recording, capture spawn data
+        if self.recording_active:
+            self._recording_assign_tag(ball, 'ball')
+            tag = self.recording_entity_tags.get(id(ball))
+            if tag:
+                timestamp_ms = pygame.time.get_ticks() - self.recording_start_time
+                self._recording_ball_spawns[tag] = {
+                    'timestamp': timestamp_ms,
+                    'position': ball.position.copy(),
+                    'velocity': ball.velocity.copy(),
+                    'spin': ball.spin.copy() if hasattr(ball, 'spin') else np.zeros(3),
+                    'racket_selector': selector  # Store which racket was used
+                }
+                self._debug_log(f"TOSS_CAPTURED tag={tag} pos={ball.position} racket={selector}")
+
     def _start_recording(self, name: str):
         """Start recording world state for save/replay (memo-based approach)"""
         self.recording_active = True
@@ -2030,6 +2114,17 @@ class GameWorld:
 
                 # Check if this is a new entity (not seen before)
                 if tag not in summoned_tags:
+                    # For balls with racket_selector, use /toss command instead of summon
+                    if entity_type == 'ball' and hasattr(self, '_recording_ball_spawns') and tag in self._recording_ball_spawns:
+                        spawn_data = self._recording_ball_spawns[tag]
+                        if 'racket_selector' in spawn_data:
+                            racket_sel = spawn_data['racket_selector']
+                            toss_cmd = f"toss {racket_sel}"
+                            commands.append((timestamp, toss_cmd))
+                            self._debug_log(f"BALL_TOSS_CMD: tag={tag} racket={racket_sel} timestamp={timestamp}")
+                            summoned_tags.add(tag)
+                            continue
+
                     # Generate summon command for this new entity
                     # Look ahead to next frame for velocity calculation
                     next_frame = self.recording_memo[i + 1] if i + 1 < len(self.recording_memo) else None
