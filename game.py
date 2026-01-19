@@ -548,8 +548,9 @@ class PlayMode:
             toss_pos[0] -= 0.04  # Toward net for side 2 (-X direction)
 
         # Spawn a ball for the toss
+        # v = sqrt(2*g*h) for h=0.16m (16cm minimum rule): v ≈ 1.8 m/s
         nbt = {
-            'velocity': np.array([0.0, 1.2, 0.0]),  # Gentle toss up (~10cm height)
+            'velocity': np.array([0.0, 1.8, 0.0]),  # Toss up (~16cm height for legal serve)
             'spin': np.zeros(3)
         }
         self.serve_ball = self.game.entity_manager.summon('ball', toss_pos, nbt)

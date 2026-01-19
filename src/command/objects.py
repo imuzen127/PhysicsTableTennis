@@ -955,6 +955,13 @@ class EntityManager:
 
     def _check_ball_racket_collision(self, ball: BallEntity, racket: RacketEntity):
         """Check and handle ball-racket collision using capture-and-release method"""
+        # Check spawn cooldown - newly spawned balls (e.g. serve toss) need time before collision
+        spawn_cooldown = 0.25  # 250ms after spawn before collision is allowed
+        spawn_time = getattr(ball, 'spawn_time', -1)
+        if hasattr(self, '_physics_time') and spawn_time >= 0:
+            if self._physics_time - spawn_time < spawn_cooldown:
+                return  # Skip - ball just spawned (serve toss rising)
+
         # Check collision cooldown to prevent double hits
         cooldown_time = 0.15  # 150ms cooldown between hits
         current_time = getattr(ball, 'last_racket_hit_time', -1)
@@ -1074,22 +1081,28 @@ class EntityManager:
         vel_normal_component = np.dot(ball.velocity, surface_normal)
         vel_tangent_component = ball.velocity - vel_normal_component * surface_normal
 
+        # Friction affects tangent component retention
+        # High friction = more grip = ball follows racket more
+        # Low friction = slip = ball keeps more of its original tangent velocity
+        tangent_retention = max(0.2, 0.9 - friction * 0.7)  # friction 0.3->0.69, friction 0.9->0.27
+
         # New velocity = racket velocity contribution + reflection
         # The faster the racket moves, the more it dominates the output
-        racket_contribution = min(racket_speed * 1.5, 15.0)  # Cap at 15 m/s
+        racket_contribution = min(racket_speed * 1.2, 12.0)  # Cap at 12 m/s (reduced from 15)
 
         if racket_speed > 0.5:
             # Racket is moving - use racket velocity as primary
             racket_dir = racket.velocity / racket_speed
-            # Output in racket direction, plus some of the original tangent
+            # Output in racket direction, friction affects control
             new_velocity = racket_dir * racket_contribution * restitution
-            new_velocity = new_velocity + vel_tangent_component * 0.3
-            # Add upward component to clear net
-            new_velocity[1] = max(new_velocity[1], 1.0)
+            # Friction reduces tangent slip, low friction retains more tangent
+            new_velocity = new_velocity + vel_tangent_component * tangent_retention * 0.4
+            # Add upward component to clear net (reduced)
+            new_velocity[1] = max(new_velocity[1], 0.5)
         else:
-            # Racket is slow - simple reflection
+            # Racket is slow - simple reflection with friction consideration
             new_velocity = -vel_normal_component * restitution * surface_normal
-            new_velocity = new_velocity + vel_tangent_component * 0.8
+            new_velocity = new_velocity + vel_tangent_component * tangent_retention
             new_velocity = new_velocity + racket.velocity * 0.5
 
         ball.velocity = new_velocity
